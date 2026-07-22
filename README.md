@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/sejong-ax-logo-square.png" width="180" alt="세종AX 로고"></p>
+
 # cloSET
 
 > 옷을 기억하고, 관리하고, 순환시키는 AI 디지털 옷장
