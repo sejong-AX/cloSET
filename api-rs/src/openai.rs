@@ -290,7 +290,8 @@ pub fn style_fallback(body_type: &str) -> Value {
 pub async fn wardrobe_detect(image_data_url: &str) -> Option<Value> {
     let key = api_key()?;
     let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(12))
+        // 서버리스 함수 최대 실행시간(플랫폼별 ~10s) 안에서 폴백이 확보되도록 짧게
+        .timeout(Duration::from_secs(9))
         .build()
         .ok()?;
     let system = concat!(

@@ -3,25 +3,31 @@
 //! 두 경로 모두 closet_api_rs::{scan_response, care_response} 동일 코어를 호출한다.
 
 use axum::{
+    http::HeaderMap,
     routing::{get, post},
     Json, Router,
 };
 use serde_json::Value;
 
-async fn scan_route(Json(payload): Json<Value>) -> Json<Value> {
-    Json(closet_api_rs::scan_response(&payload).await)
+fn authorized(headers: &HeaderMap) -> bool {
+    let provided = headers.get("x-closet-proxy").and_then(|v| v.to_str().ok());
+    closet_api_rs::proxy_authorized(provided)
 }
 
-async fn care_route(Json(payload): Json<Value>) -> Json<Value> {
-    Json(closet_api_rs::care_response(&payload).await)
+async fn scan_route(headers: HeaderMap, Json(payload): Json<Value>) -> Json<Value> {
+    Json(closet_api_rs::scan_response(&payload, authorized(&headers)).await)
 }
 
-async fn style_route(Json(payload): Json<Value>) -> Json<Value> {
-    Json(closet_api_rs::style_response(&payload).await)
+async fn care_route(headers: HeaderMap, Json(payload): Json<Value>) -> Json<Value> {
+    Json(closet_api_rs::care_response(&payload, authorized(&headers)).await)
 }
 
-async fn wardrobe_route(Json(payload): Json<Value>) -> Json<Value> {
-    Json(closet_api_rs::wardrobe_response(&payload).await)
+async fn style_route(headers: HeaderMap, Json(payload): Json<Value>) -> Json<Value> {
+    Json(closet_api_rs::style_response(&payload, authorized(&headers)).await)
+}
+
+async fn wardrobe_route(headers: HeaderMap, Json(payload): Json<Value>) -> Json<Value> {
+    Json(closet_api_rs::wardrobe_response(&payload, authorized(&headers)).await)
 }
 
 #[tokio::main]

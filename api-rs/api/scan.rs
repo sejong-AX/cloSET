@@ -9,6 +9,12 @@ async fn main() -> Result<(), Error> {
 }
 
 async fn handler(req: Request) -> Result<Value, Error> {
+    let provided = req
+        .headers()
+        .get("x-closet-proxy")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string());
+    let authorized = closet_api_rs::proxy_authorized(provided.as_deref());
     let bytes = req
         .into_body()
         .collect()
@@ -16,5 +22,5 @@ async fn handler(req: Request) -> Result<Value, Error> {
         .map(|c| c.to_bytes())
         .unwrap_or_default();
     let payload: Value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
-    Ok(closet_api_rs::scan_response(&payload).await)
+    Ok(closet_api_rs::scan_response(&payload, authorized).await)
 }

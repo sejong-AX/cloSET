@@ -11,8 +11,21 @@ fn cap(s: &str, max: usize) -> String {
     s.chars().take(max).collect()
 }
 
+/// 프록시 공유 시크릿 검증. 프론트 Route Handler 가 주입하는 x-closet-proxy 헤더가
+/// 서버 env(CLOSET_PROXY_SECRET)와 일치할 때만 유료 GPT-4o 호출을 허용한다.
+/// env 미설정이면 검사를 끈다(로컬/개발). 미인증 요청은 결정적 폴백만 받는다 → 비용/DoS 상한.
+pub fn proxy_authorized(provided: Option<&str>) -> bool {
+    match std::env::var("CLOSET_PROXY_SECRET") {
+        Ok(secret) if !secret.trim().is_empty() => provided == Some(secret.as_str()),
+        _ => true,
+    }
+}
+
+/// Vercel/서버리스 요청 본문 상한(base64 data URL + JSON). Vercel 본문 한도(~4.5MB) 이내로 정렬.
+const MAX_IMAGE_BYTES: usize = 4_000_000;
+
 /// POST /api/scan 응답. payload: { category?: string, price?: string|number }
-pub async fn scan_response(payload: &Value) -> Value {
+pub async fn scan_response(payload: &Value, authorized: bool) -> Value {
     let category = cap(
         payload
             .get("category")
@@ -29,7 +42,11 @@ pub async fn scan_response(payload: &Value) -> Value {
         20,
     );
     let facts = rules::evaluate_scan(&category, &price);
-    let llm = openai::scan_llm_copy(&facts).await;
+    let llm = if authorized {
+        openai::scan_llm_copy(&facts).await
+    } else {
+        None
+    };
     let (headline, reasons, alt, source, model) = match llm {
         Some((h, r, a)) => (h, r, a, "openai", Some(openai::model_name())),
         None => {
@@ -53,7 +70,7 @@ pub async fn scan_response(payload: &Value) -> Value {
 }
 
 /// POST /api/care 응답. payload: { material?: string }
-pub async fn care_response(payload: &Value) -> Value {
+pub async fn care_response(payload: &Value, authorized: bool) -> Value {
     let material = cap(
         payload
             .get("material")
@@ -62,7 +79,11 @@ pub async fn care_response(payload: &Value) -> Value {
         60,
     );
     let facts = rules::evaluate_care(&material);
-    let guide = openai::care_llm_guide(&facts).await;
+    let guide = if authorized {
+        openai::care_llm_guide(&facts).await
+    } else {
+        None
+    };
     let (body, source, model) = match guide {
         Some(b) => (b, "openai", Some(openai::model_name())),
         None => (facts.base_guide.to_string(), "fallback", None),
@@ -79,7 +100,7 @@ pub async fn care_response(payload: &Value) -> Value {
 
 /// POST /api/style 응답. payload: { image?: data-url, bodyType?: string, season?: string }
 /// 사진이 있으면 GPT-4o 비전으로 체형 맞춤 추천, 없거나 실패 시 체형별 결정적 폴백.
-pub async fn style_response(payload: &Value) -> Value {
+pub async fn style_response(payload: &Value, authorized: bool) -> Value {
     let body_type = cap(
         payload
             .get("bodyType")
@@ -94,13 +115,15 @@ pub async fn style_response(payload: &Value) -> Value {
             .unwrap_or("여름 쿨"),
         24,
     );
-    if let Some(img) = payload.get("image").and_then(|v| v.as_str()) {
-        if img.starts_with("data:image") && img.len() < 6_000_000 {
-            if let Some(v) = openai::style_recommend(img, &body_type, &season).await {
-                let mut out = v;
-                out["source"] = json!("openai");
-                out["model"] = json!(openai::model_name());
-                return out;
+    if authorized {
+        if let Some(img) = payload.get("image").and_then(|v| v.as_str()) {
+            if img.starts_with("data:image") && img.len() < MAX_IMAGE_BYTES {
+                if let Some(v) = openai::style_recommend(img, &body_type, &season).await {
+                    let mut out = v;
+                    out["source"] = json!("openai");
+                    out["model"] = json!(openai::model_name());
+                    return out;
+                }
             }
         }
     }
@@ -109,14 +132,16 @@ pub async fn style_response(payload: &Value) -> Value {
 
 /// POST /api/wardrobe 응답. payload: { image?: data-url }
 /// 사진(옷장·갤러리) 속 의류 아이템을 GPT-4o 비전으로 식별, 실패 시 편집용 초안 1점.
-pub async fn wardrobe_response(payload: &Value) -> Value {
-    if let Some(img) = payload.get("image").and_then(|v| v.as_str()) {
-        if img.starts_with("data:image") && img.len() < 8_000_000 {
-            if let Some(v) = openai::wardrobe_detect(img).await {
-                let mut out = v;
-                out["source"] = json!("openai");
-                out["model"] = json!(openai::model_name());
-                return out;
+pub async fn wardrobe_response(payload: &Value, authorized: bool) -> Value {
+    if authorized {
+        if let Some(img) = payload.get("image").and_then(|v| v.as_str()) {
+            if img.starts_with("data:image") && img.len() < MAX_IMAGE_BYTES {
+                if let Some(v) = openai::wardrobe_detect(img).await {
+                    let mut out = v;
+                    out["source"] = json!("openai");
+                    out["model"] = json!(openai::model_name());
+                    return out;
+                }
             }
         }
     }
