@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useApp } from "../app-context";
 import { Icon } from "../Sprite";
 
@@ -19,18 +19,42 @@ interface ScanResult {
 
 export function ScanView() {
   const { toast } = useApp();
-  const [productShown, setProductShown] = useState(false);
+  const [productImg, setProductImg] = useState<string | null>(null);
+  const [dragging, setDragging] = useState(false);
   const [category, setCategory] = useState("니트 · 상의");
   const [price, setPrice] = useState("79,000원");
   const [analyzeLabel, setAnalyzeLabel] = useState("내 옷장과 비교하기");
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<ScanResult | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const urlRef = useRef<string | null>(null);
+
+  // 업로드한 이미지 objectURL 정리(누수 방지)
+  useEffect(
+    () => () => {
+      if (urlRef.current) URL.revokeObjectURL(urlRef.current);
+    },
+    []
+  );
+
+  // 실제로 추가(선택/드롭)한 이미지만 미리보기로 띄운다
+  const handleFile = (file: File | undefined | null) => {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      toast("이미지 파일(JPG·PNG)만 올릴 수 있어요");
+      return;
+    }
+    if (urlRef.current) URL.revokeObjectURL(urlRef.current);
+    const url = URL.createObjectURL(file);
+    urlRef.current = url;
+    setProductImg(url);
+    toast("상품 사진을 불러왔어요");
+  };
 
   const analyze = async () => {
     if (busy) return;
-    if (!productShown) setProductShown(true);
     setBusy(true);
-    setAnalyzeLabel("옷장 24벌과 비교 중…");
+    setAnalyzeLabel("내 옷장과 비교 중…");
     try {
       const res = await fetch("/api/scan", {
         method: "POST",
@@ -72,18 +96,43 @@ export function ScanView() {
       <div className="grid scan-layout">
         <article className="card upload-box">
           <div
-            className="dropzone"
-            onClick={() => {
-              setProductShown(true);
-              toast("샘플 상품 이미지를 불러왔어요");
+            className={"dropzone" + (dragging ? " dragging" : "")}
+            role="button"
+            tabIndex={0}
+            aria-label="상품 사진 올리기"
+            onClick={() => fileRef.current?.click()}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                fileRef.current?.click();
+              }
+            }}
+            onDragOver={(e) => {
+              e.preventDefault();
+              setDragging(true);
+            }}
+            onDragLeave={() => setDragging(false)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setDragging(false);
+              handleFile(e.dataTransfer.files?.[0]);
             }}
           >
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => handleFile(e.target.files?.[0])}
+            />
             <Icon id="i-upload" />
             <b>상품 사진을 놓거나 클릭하세요</b>
             <span>옷 · 신발 · 액세서리 JPG, PNG</span>
-            <div className={"scan-product" + (productShown ? " show" : "")}>
-              <img src="/items/knit.jpg" alt="스캔한 상품" />
-            </div>
+            {productImg && (
+              <div className="scan-product show">
+                <img src={productImg} alt="업로드한 상품" />
+              </div>
+            )}
           </div>
           <div className="scan-form">
             <div className="field">

@@ -91,3 +91,5 @@ button,input,select{font:inherit}button{color:inherit}svg{display:block}.hidden{
 .tpo-chip:hover{border-color:#85aa9c;background:var(--mint)}
 .tpo-chip.active{background:var(--forest);border-color:var(--forest);color:white}
 .tpo-chip>span{font-size:13px}
+/* Snap & Check 드롭존 드래그 오버 강조 */
+.dropzone.dragging{background:var(--mint);border-color:var(--forest)}
