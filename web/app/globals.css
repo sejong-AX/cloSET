@@ -76,3 +76,18 @@ button,input,select{font:inherit}button{color:inherit}svg{display:block}.hidden{
 .notif-body span{font-size:10px;color:var(--sub);margin-top:3px;display:block}
 .notif-all{width:100%;border:0;border-top:1px solid var(--line);background:transparent;color:var(--sub);font-size:10px;font-weight:800;padding:11px;margin-top:4px;cursor:pointer}
 .notif-all:hover{color:var(--forest)}
+/* 헤더 액션 버튼: 아이콘 세로 늘어남 방지(콤팩트) + JULY 21 선에 맞춰 상단 정렬 */
+.btn svg{height:16px}
+.page-head .head-actions{align-self:flex-start}
+/* TPO 추천 확장 버튼 */
+.tpo-bar{margin:-4px 0 18px}
+.tpo-toggle{display:inline-flex;align-items:center;gap:12px;border:1px solid var(--line);background:white;border-radius:12px;padding:9px 14px;font-weight:800;font-size:12px;cursor:pointer;box-shadow:0 4px 16px rgba(24,70,57,.04)}
+.tpo-toggle:hover{border-color:#b9cbc4}
+.tpo-toggle-label{color:var(--forest)}
+.tpo-toggle-cur{color:var(--ink);font-weight:700}
+.tpo-caret{color:var(--sub);font-size:9px}
+.tpo-chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;animation:fade .2s ease}
+.tpo-chip{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--line);background:white;border-radius:999px;padding:9px 14px;font-size:11px;font-weight:800;color:var(--sub);cursor:pointer;transition:.15s}
+.tpo-chip:hover{border-color:#85aa9c;background:var(--mint)}
+.tpo-chip.active{background:var(--forest);border-color:var(--forest);color:white}
+.tpo-chip>span{font-size:13px}
