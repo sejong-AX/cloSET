@@ -1,0 +1,8 @@
+# Next.js
+/.next/
+/out/
+next-env.d.ts
+*.tsbuildinfo
+
+# 로컬 환경 변수 (실제 키)
+.env*.local
