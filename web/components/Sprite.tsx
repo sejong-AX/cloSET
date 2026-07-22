@@ -53,7 +53,7 @@ export function Sprite() {
 
 export function Icon({ id }: { id: string }) {
   return (
-    <svg>
+    <svg viewBox="0 0 24 24">
       <use href={`#${id}`} />
     </svg>
   );
