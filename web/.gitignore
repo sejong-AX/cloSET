@@ -6,3 +6,7 @@ next-env.d.ts
 
 # 로컬 환경 변수 (실제 키)
 .env*.local
+
+# Vercel
+.vercel/
+.vercel
