@@ -67,7 +67,7 @@ export function playViewEntrance(viewEl: HTMLElement, reduced: boolean) {
         { y: 0, opacity: 1, duration: 0.4, ease: "power3.out" }
       );
 
-    const rack = viewEl.querySelectorAll(".hero-outfit .rack .garment");
+    const rack = viewEl.querySelectorAll(".hero-outfit .rack .rack-item");
     if (rack.length) {
       gsap.fromTo(
         rack,

@@ -49,12 +49,20 @@ export function HomeView() {
           <div className="outfit-stage">
             <div className="stage-pill">51일 만에 다시 만난 니트</div>
             <div className="rack">
-              <div className="garment coat"></div>
-              <div>
-                <div className="garment top-g"></div>
-                <div className="garment pants"></div>
+              <div className="rack-item coat-slot">
+                <img src="/items/coat.jpg" alt="베이지 트렌치코트" />
               </div>
-              <div className="garment shoe"></div>
+              <div className="rack-col">
+                <div className="rack-item top-slot">
+                  <img src="/items/knit.jpg" alt="네이비 울 니트" />
+                </div>
+                <div className="rack-item pants-slot">
+                  <img src="/items/pants.jpg" alt="크림 와이드 팬츠" />
+                </div>
+              </div>
+              <div className="rack-item shoe-slot">
+                <img src="/items/shoe.jpg" alt="스웨이드 로퍼" />
+              </div>
             </div>
           </div>
           <div className="outfit-info">
@@ -117,9 +125,15 @@ export function HomeView() {
               </button>
             </div>
             <div className="outfit-row">
-              <div className="swatch-item" style={{ background: "#e9e2d6" }}></div>
-              <div className="swatch-item" style={{ background: "#53635e" }}></div>
-              <div className="swatch-item" style={{ background: "#282e2d" }}></div>
+              <div className="swatch-item">
+                <img src="/items/shirt.jpg" alt="오프화이트 셔츠" />
+              </div>
+              <div className="swatch-item">
+                <img src="/items/knit2.jpg" alt="블랙 오버핏 니트" />
+              </div>
+              <div className="swatch-item">
+                <img src="/items/pants.jpg" alt="차콜 슬랙스" />
+              </div>
             </div>
             <div className="saved-meta">
               <span>출근 · 3회 착용</span>
