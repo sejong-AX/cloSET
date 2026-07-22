@@ -142,7 +142,7 @@ export function ScanView() {
                 ))}
               </div>
               <div className="section-title">
-                <h2>내 옷장 속 대체제</h2>
+                <h2>내 옷장 속 대체재</h2>
                 <span>유사도순</span>
               </div>
               <div className="similar-strip">

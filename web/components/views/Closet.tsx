@@ -143,7 +143,7 @@ export function ClosetView() {
       >
         <div className="modal">
           <h2>새 옷 등록</h2>
-          <p>사진 없이도 등록할 수 있어요. 저장 후 AI 태그를 추가할 수 있습니다.</p>
+          <p>사진 없이도 등록할 수 있어요. 저장 후 AI 태그를 추가할 수 있어요.</p>
           <div className="modal-form">
             <div className="field">
               <label>옷 이름</label>
