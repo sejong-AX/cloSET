@@ -98,7 +98,7 @@ fn facts_json(f: &ScanFacts) -> Value {
 async fn chat_json(system: &str, user: &str, temperature: f32) -> Option<Value> {
     let key = api_key()?;
     let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(15))
+        .timeout(Duration::from_secs(8)) // 플랫폼 함수 타임아웃(~10s)보다 짧게 → 폴백 확보
         .build()
         .ok()?;
     let resp = client
@@ -140,8 +140,8 @@ pub async fn scan_llm_copy(f: &ScanFacts) -> Option<ScanCopy> {
     let parsed = chat_json(system, &user, 0.6).await?;
     let headline = parsed["headline"].as_str()?.to_string();
     let reasons_v = parsed["reasons"].as_array()?;
-    if reasons_v.is_empty() {
-        return None;
+    if reasons_v.len() != 3 {
+        return None; // '정확히 3개' 계약 미충족 → 폴백
     }
     let mut reasons: Vec<Reason> = Vec::new();
     for r in reasons_v {
@@ -177,4 +177,111 @@ pub async fn care_llm_guide(f: &CareFacts) -> Option<String> {
     } else {
         Some(body)
     }
+}
+
+/// 사진(data URL) → GPT-4o 비전으로 체형 맞춤 스타일 추천. 실패 시 None → 결정적 폴백.
+pub async fn style_recommend(image_data_url: &str, body_type: &str, season: &str) -> Option<Value> {
+    let key = api_key()?;
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(9))
+        .build()
+        .ok()?;
+    let system = concat!(
+        "너는 cloSET의 퍼스널 스타일리스트다. 사용자가 올린 사진에서 체형·실루엣·비율을 관찰해, ",
+        "그 체형에 어울리는 옷 실루엣과 스타일링을 추천한다. 외모 평가·신원·얼굴 언급은 하지 말고 옷 실루엣 중심으로만 조언한다. ",
+        "진단을 단정하지 말고 부드럽게 제안한다. 따뜻하고 담백한 한국어 존댓말, 이모지·과장 금지. ",
+        "반드시 아래 JSON 으로만 답한다: {\"bodyType\": string(추정 체형 한 단어), \"summary\": string(2문장), ",
+        "\"tips\": [{\"title\": string, \"detail\": string}] (정확히 4개), \"recommend\": [string] (추천 아이템/실루엣 4개)}"
+    );
+    let user_text = format!(
+        "참고 프로필 — 체형 유형: {}, 시즌 컬러: {}. 사진 속 인물의 체형·어깨·허리 비율에 맞는 옷 실루엣과 코디를 추천해줘.",
+        body_type, season
+    );
+    let resp = client
+        .post("https://api.openai.com/v1/chat/completions")
+        .bearer_auth(&key)
+        .json(&json!({
+            "model": model_name(),
+            "temperature": 0.5,
+            "max_tokens": 700,
+            "response_format": { "type": "json_object" },
+            "messages": [
+                { "role": "system", "content": system },
+                { "role": "user", "content": [
+                    { "type": "text", "text": user_text },
+                    { "type": "image_url", "image_url": { "url": image_data_url } }
+                ]}
+            ]
+        }))
+        .send()
+        .await
+        .ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let data: Value = resp.json().await.ok()?;
+    let content = data["choices"][0]["message"]["content"].as_str()?;
+    let parsed: Value = serde_json::from_str(content).ok()?;
+    if parsed.get("summary").and_then(|v| v.as_str()).is_some()
+        && parsed
+            .get("tips")
+            .and_then(|v| v.as_array())
+            .map(|a| !a.is_empty())
+            .unwrap_or(false)
+    {
+        Some(parsed)
+    } else {
+        None
+    }
+}
+
+/// 사진 없음·키 없음·실패 시 체형별 결정적 추천
+pub fn style_fallback(body_type: &str) -> Value {
+    let bt = body_type.to_lowercase();
+    let (label, summary, tips, recommend): (&str, &str, Vec<(&str, &str)>, Vec<&str>) =
+        if bt.contains("wave") || bt.contains("웨이브") || bt.contains("곡선") {
+            (
+                "웨이브(곡선형)",
+                "부드러운 곡선과 아담한 상체 실루엣에 어울리는 스타일을 모았어요. 허리를 살리는 핏이 잘 맞아요.",
+                vec![
+                    ("하이웨이스트로 다리 길이 강조", "허리선이 높은 팬츠·스커트로 비율을 살려요."),
+                    ("상체는 가볍고 또렷하게", "얇은 니트·리브드 탑으로 상체 볼륨을 정돈해요."),
+                    ("소프트한 드레이프 소재", "부드럽게 떨어지는 소재가 곡선과 잘 어울려요."),
+                    ("발목을 드러내는 기장", "크롭·앵클 기장으로 가벼운 인상을 줘요."),
+                ],
+                vec!["하이웨이스트 와이드 팬츠", "리브드 니트", "랩 블라우스", "앵클 팬츠"],
+            )
+        } else if bt.contains("natural") || bt.contains("내추럴") || bt.contains("프레임") {
+            (
+                "내추럴(프레임형)",
+                "골격이 또렷하고 프레임감이 있는 실루엣에 어울리는 여유로운 스타일이에요. 넉넉한 핏이 멋스러워요.",
+                vec![
+                    ("오버사이즈로 프레임을 살리기", "박시한 코트·셔츠가 자연스럽게 어울려요."),
+                    ("두께감 있는 소재", "울·데님 등 텍스처가 있는 소재가 좋아요."),
+                    ("레이어드로 리듬 주기", "가디건·셔츠를 겹쳐 입어 입체감을 더해요."),
+                    ("직선적인 실루엣", "스트레이트 팬츠로 시원하게 떨어뜨려요."),
+                ],
+                vec!["오버사이즈 코트", "박시 셔츠", "스트레이트 데님", "청키 니트"],
+            )
+        } else {
+            (
+                "스트레이트(직선형)",
+                "상체가 또렷하고 탄탄한 실루엣에 어울리는 깔끔한 스타일을 모았어요. 군더더기 없는 핏이 잘 맞아요.",
+                vec![
+                    ("V넥·오픈 네크로 목선 강조", "쇄골을 드러내면 상체가 시원해 보여요."),
+                    ("정돈된 스트레이트 핏", "몸에 딱 붙지 않는 반듯한 실루엣이 좋아요."),
+                    ("매끈하고 고급스러운 소재", "울·코튼처럼 표면이 정돈된 소재를 추천해요."),
+                    ("아이템은 적게, 핏은 정확히", "레이어를 줄이고 핏으로 완성해요."),
+                ],
+                vec!["V넥 니트", "테일러드 코트", "스트레이트 슬랙스", "실키 셔츠"],
+            )
+        };
+    json!({
+        "bodyType": label,
+        "summary": summary,
+        "tips": tips.iter().map(|(t, d)| json!({"title": t, "detail": d})).collect::<Vec<_>>(),
+        "recommend": recommend,
+        "source": "fallback",
+        "model": Value::Null,
+    })
 }

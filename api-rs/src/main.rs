@@ -16,12 +16,17 @@ async fn care_route(Json(payload): Json<Value>) -> Json<Value> {
     Json(closet_api_rs::care_response(&payload).await)
 }
 
+async fn style_route(Json(payload): Json<Value>) -> Json<Value> {
+    Json(closet_api_rs::style_response(&payload).await)
+}
+
 #[tokio::main]
 async fn main() {
     let app = Router::new()
         .route("/health", get(|| async { "ok" }))
         .route("/api/scan", post(scan_route))
-        .route("/api/care", post(care_route));
+        .route("/api/care", post(care_route))
+        .route("/api/style", post(style_route));
 
     let port: u16 = std::env::var("PORT")
         .ok()

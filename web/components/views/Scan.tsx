@@ -55,13 +55,18 @@ export function ScanView() {
     if (busy) return;
     setBusy(true);
     setAnalyzeLabel("내 옷장과 비교 중…");
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 12000);
     try {
       const res = await fetch("/api/scan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ category, price }),
+        signal: controller.signal,
       });
+      if (!res.ok) throw new Error(`status ${res.status}`);
       const data: ScanResult = await res.json();
+      if (!data || !data.verdict) throw new Error("unexpected response");
       setResult(data);
       setAnalyzeLabel("다시 비교하기");
       toast(
@@ -73,6 +78,7 @@ export function ScanView() {
       setAnalyzeLabel("다시 비교하기");
       toast("분석에 실패했어요. 잠시 후 다시 시도해 주세요.");
     } finally {
+      clearTimeout(timer);
       setBusy(false);
     }
   };

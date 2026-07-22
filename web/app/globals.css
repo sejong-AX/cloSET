@@ -93,3 +93,48 @@ button,input,select{font:inherit}button{color:inherit}svg{display:block}.hidden{
 .tpo-chip>span{font-size:13px}
 /* Snap & Check 드롭존 드래그 오버 강조 */
 .dropzone.dragging{background:var(--mint);border-color:var(--forest)}
+/* 새 옷 등록 모달 사진 첨부 */
+.modal-photo{width:100%;height:78px;border:1.5px dashed #a9c2b8;background:#f4f8f6;border-radius:12px;display:flex;align-items:center;justify-content:center;gap:9px;cursor:pointer;color:var(--forest);font-size:11px;font-weight:800;overflow:hidden;position:relative;margin:16px 0 0}
+.modal-photo:hover{background:var(--mint)}
+.modal-photo svg{width:20px}
+.modal-photo img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.modal-photo.has{border-style:solid;border-color:var(--forest)}
+.modal-photo-label{position:relative;z-index:1}
+.modal-photo.has .modal-photo-label{color:white;background:rgba(13,28,23,.55);padding:5px 11px;border-radius:8px;backdrop-filter:blur(4px)}
+/* 체형 맞춤 추천 모달 */
+.modal.body-style .modal-actions{margin-top:16px}
+.bs-photo{height:220px;flex-direction:column;text-align:center;line-height:1.5}
+.bs-photo svg{width:26px}
+.bs-result{margin-top:16px}
+.bs-head{display:flex;align-items:center;gap:8px;margin-bottom:10px}
+.bs-badge{background:var(--forest);color:white;font-size:11px;font-weight:800;padding:5px 12px;border-radius:999px;letter-spacing:.02em}
+.bs-ai{font-size:9px;font-weight:800;color:var(--forest);background:var(--mint);padding:4px 9px;border-radius:999px}
+.bs-summary{color:var(--ink);font-size:12px;line-height:1.65;margin:0 0 14px}
+.bs-tips{display:grid;gap:8px;margin-bottom:14px}
+.bs-tip{background:#f4f8f6;border:1px solid #e2ece7;border-radius:11px;padding:11px 13px;display:grid;gap:3px}
+.bs-tip b{font-size:11px;color:var(--forest);font-weight:800}
+.bs-tip span{font-size:11px;color:var(--sub);line-height:1.55}
+.bs-reco-title{font-size:10px;font-weight:800;color:var(--sub);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px}
+.bs-reco{display:flex;flex-wrap:wrap;gap:7px}
+.bs-chip{font-size:11px;font-weight:700;color:var(--forest);background:var(--mint);border:1px solid #cfe3da;padding:6px 12px;border-radius:999px}
+/* 지표 보조 텍스트 대비 상향(WCAG AA) */
+.metric small{color:#2f7355}
+.metric small.down{color:#3a6274}
+/* 옷 카드 제목 말줄임 + 즐겨찾기 하트 색 */
+.cloth-title b{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cloth-title button.faved{color:#e05a5a}
+/* 옷장/케어 빈 상태 */
+.closet-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:7px;padding:56px 20px;color:var(--sub)}
+.closet-empty svg{width:40px;color:#9eaaa6;margin-bottom:4px}
+.closet-empty b{font-size:15px;color:var(--ink)}
+.closet-empty p{font-size:11px;margin:0}
+.closet-empty .btn{margin-top:10px}
+/* 되돌리기 토스트 */
+.toast{display:flex;align-items:center;gap:14px}
+.toast-action{border:0;background:transparent;color:#8fe0c4;font-weight:900;font-size:11px;cursor:pointer;padding:0;white-space:nowrap}
+.toast-action:hover{color:#b6ecdb}
+/* 포커스 가시성(키보드 접근성) */
+.search:focus-within{border-color:var(--forest);box-shadow:0 0 0 3px rgba(31,106,88,.12)}
+.chip:focus-visible,.btn:focus-visible,.cloth-del:focus-visible,.tpo-chip:focus-visible,.route-card:focus-visible,.modal-photo:focus-visible,.notif-item:focus-visible,.dropzone:focus-visible{outline:2px solid var(--forest);outline-offset:2px}
+/* 알림 패널 모바일 — 화면 밖 잘림 방지 */
+@media(max-width:520px){.notif-panel{position:fixed;left:10px;right:10px;top:64px;width:auto}}

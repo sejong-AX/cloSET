@@ -12,10 +12,19 @@ export interface Item {
   wear: string;
   cpw: string;
   img: string;
+  daysAgo: number; // 마지막 착용일(안정값, 렌더 인덱스 아님)
 }
 
+// 상태 → 라벨 매핑(케어 완료 등 상태 변경 시 라벨 일관성 유지)
+export const STATE_LABEL: Record<ClothState, string> = {
+  available: "입을 수 있음",
+  laundry: "세탁 필요",
+  stored: "보관",
+  reuse: "순환 후보",
+};
+
 // 샘플 옷장 — mockup/index.html 의 items 배열 기반 시드 데이터 + 실제 옷 사진(Pexels, public/items)
-const SEED: Omit<Item, "id">[] = [
+const SEED: Omit<Item, "id" | "daysAgo">[] = [
   { name: "베이지 트렌치코트", cat: "아우터 · 옷장 1", state: "available", label: "입을 수 있음", bg: "#e9e0d3", type: "coat", color: "#8f806f", wear: "12회", cpw: "₩10,750", img: "/items/coat.jpg" },
   { name: "네이비 울 니트", cat: "상의 · 옷장 2", state: "laundry", label: "세탁 필요", bg: "#dfe7e8", type: "top-g", color: "#233d56", wear: "14회", cpw: "₩6,350", img: "/items/knit.jpg" },
   { name: "크림 와이드 팬츠", cat: "하의 · 옷장 1", state: "available", label: "입을 수 있음", bg: "#ede9df", type: "pants", color: "#d2cabc", wear: "9회", cpw: "₩7,650", img: "/items/pants.jpg" },
@@ -42,7 +51,11 @@ const SEED: Omit<Item, "id">[] = [
   { name: "카멜 오버 니트", cat: "상의 · 계절 보관함", state: "reuse", label: "순환 후보", bg: "#e6ddcf", type: "top-g", color: "#a07b52", wear: "3회", cpw: "₩24,000", img: "/items/knit-camel.jpg" },
 ];
 
-export const initialItems: Item[] = SEED.map((it, i) => ({ ...it, id: `seed-${i}` }));
+export const initialItems: Item[] = SEED.map((it, i) => ({
+  ...it,
+  id: `seed-${i}`,
+  daysAgo: 1 + ((i * 5 + 2) % 40), // 결정적·안정적인 마지막 착용일
+}));
 
 export type ViewName = "home" | "closet" | "scan" | "care" | "reuse" | "insights" | "settings";
 

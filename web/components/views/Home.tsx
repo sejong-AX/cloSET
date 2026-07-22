@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import gsap from "gsap";
 import { useApp } from "../app-context";
 import { Icon } from "../Sprite";
+import { BodyStyleModal } from "../BodyStyleModal";
 
 interface Outfit {
   rank: string;
@@ -103,6 +104,8 @@ function describeWeather(code: number): { label: string; icon: string } {
   if (code <= 86) return { label: "눈", icon: "🌨️" };
   return { label: "뇌우", icon: "⛈️" };
 }
+// 홈 재방문마다 재요청하지 않도록 세션 캐시(10분)
+let weatherCache: { data: Weather; at: number } | null = null;
 
 export function HomeView() {
   const { toast, switchView } = useApp();
@@ -111,13 +114,18 @@ export function HomeView() {
   const [saved, setSaved] = useState(false);
   const [outfitIdx, setOutfitIdx] = useState(0);
   const [tpoOpen, setTpoOpen] = useState(false);
+  const [styleOpen, setStyleOpen] = useState(false);
   const [weather, setWeather] = useState<Weather>(FALLBACK_WEATHER);
   const outfit = OUTFITS[outfitIdx];
   const rackRef = useRef<HTMLDivElement>(null);
-  const firstRender = useRef(true);
+  const prevOutfit = useRef(outfitIdx);
 
-  // 세종시 실시간 날씨 로드 (실패 시 FALLBACK 유지)
+  // 세종시 실시간 날씨 로드 (실패 시 FALLBACK 유지, 10분 캐시)
   useEffect(() => {
+    if (weatherCache && Date.now() - weatherCache.at < 600000) {
+      setWeather(weatherCache.data);
+      return;
+    }
     const ctrl = new AbortController();
     (async () => {
       try {
@@ -132,14 +140,16 @@ export function HomeView() {
         const hourKey = String(d?.current?.time ?? "").slice(0, 13);
         const idx = times.findIndex((t) => t.slice(0, 13) === hourKey);
         const precip = idx >= 0 ? Number(d?.hourly?.precipitation_probability?.[idx] ?? 0) : 0;
-        setWeather({
+        const w: Weather = {
           apparent: Math.round(Number(d?.current?.apparent_temperature ?? 26)),
           precip,
           max: Math.round(Number(d?.daily?.temperature_2m_max?.[0] ?? 29)),
           min: Math.round(Number(d?.daily?.temperature_2m_min?.[0] ?? 21)),
           label: wx.label,
           icon: wx.icon,
-        });
+        };
+        setWeather(w);
+        weatherCache = { data: w, at: Date.now() };
       } catch {
         /* keep fallback */
       }
@@ -147,12 +157,10 @@ export function HomeView() {
     return () => ctrl.abort();
   }, []);
 
-  // 조합이 바뀔 때 랙 이미지 재진입 애니메이션(최초 렌더는 뷰 진입 연출에 양보)
+  // 조합이 실제로 바뀔 때만 랙 재진입 애니메이션(마운트·StrictMode 재실행엔 반응 안 함)
   useEffect(() => {
-    if (firstRender.current) {
-      firstRender.current = false;
-      return;
-    }
+    if (prevOutfit.current === outfitIdx) return;
+    prevOutfit.current = outfitIdx;
     const reduce =
       typeof window !== "undefined" &&
       window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -192,6 +200,10 @@ export function HomeView() {
         <div className="head-actions">
           <button className="btn soft" onClick={nextOutfit}>
             다른 조합
+          </button>
+          <button className="btn soft" onClick={() => setStyleOpen(true)}>
+            <Icon id="i-scan" />
+            체형 추천
           </button>
           <button className="btn primary" onClick={() => switchView("scan")}>
             <Icon id="i-scan" />
@@ -314,13 +326,13 @@ export function HomeView() {
             </div>
             <div className="outfit-row">
               <div className="swatch-item">
-                <img src="/items/shirt.jpg" alt="오프화이트 셔츠" />
+                <img src="/items/shirt.jpg" alt="화이트 셔츠" />
               </div>
               <div className="swatch-item">
-                <img src="/items/knit2.jpg" alt="블랙 오버핏 니트" />
+                <img src="/items/knit2.jpg" alt="그레이 니트" />
               </div>
               <div className="swatch-item">
-                <img src="/items/pants.jpg" alt="차콜 슬랙스" />
+                <img src="/items/pants.jpg" alt="크림 와이드 팬츠" />
               </div>
             </div>
             <div className="saved-meta">
@@ -413,6 +425,13 @@ export function HomeView() {
           </div>
         </article>
       </div>
+      <BodyStyleModal
+        open={styleOpen}
+        onClose={() => setStyleOpen(false)}
+        toast={toast}
+        bodyType="Straight"
+        season="여름 쿨"
+      />
     </section>
   );
 }

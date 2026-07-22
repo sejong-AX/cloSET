@@ -29,6 +29,10 @@ path = "api/scan.rs"
 name = "care"
 path = "api/care.rs"
 
+[[bin]]
+name = "style"
+path = "api/style.rs"
+
 # 로컬/포터블 axum 서버 (cargo run --features server --bin server)
 [[bin]]
 name = "server"

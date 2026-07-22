@@ -3,7 +3,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppContext, type AppContextValue } from "./app-context";
 import { Icon } from "./Sprite";
-import { initialItems, viewTitles, type Item, type ViewName } from "@/lib/data";
+import {
+  initialItems,
+  viewTitles,
+  STATE_LABEL,
+  type ClothState,
+  type Item,
+  type ViewName,
+} from "@/lib/data";
 import { playViewEntrance, prefersReduced } from "@/lib/anim";
 import { HomeView } from "./views/Home";
 import { ClosetView } from "./views/Closet";
@@ -51,37 +58,100 @@ const NOTIFS: Notif[] = [
   { icon: "☂️", title: "오후 비 확률 70% — 트렌치가 포함된 조합을 추천했어요", time: "오전 8:10", view: "home" },
 ];
 
+interface ToastAction {
+  label: string;
+  onAction: () => void;
+}
 interface AppShellProps {
-  toast: (msg: string) => void;
+  toast: (msg: string, action?: ToastAction) => void;
   onLogout: () => void;
 }
+
+const ITEMS_KEY = "closet.items";
+const FAVS_KEY = "closet.favorites";
 
 export function AppShell({ toast, onLogout }: AppShellProps) {
   const [view, setView] = useState<ViewName>("home");
   const [closetQuery, setClosetQuery] = useState("");
   const [globalSearch, setGlobalSearch] = useState("");
-  const [reduced, setReduced] = useState(false);
+  // 감속 선호를 동기 초기화 → 최초 진입 애니메이션도 즉시 존중
+  const [reduced] = useState<boolean>(() => prefersReduced());
   const [items, setItems] = useState<Item[]>(initialItems);
+  const [favorites, setFavorites] = useState<Set<string>>(new Set());
   const [notifOpen, setNotifOpen] = useState(false);
+  const [notifRead, setNotifRead] = useState(false);
+  const [hydrated, setHydrated] = useState(false);
   const idCounter = useRef(0);
+  const notifPanelRef = useRef<HTMLDivElement | null>(null);
+
+  // 저장소 복원 (마운트 후 — SSR 하이드레이션 불일치 방지)
+  useEffect(() => {
+    try {
+      const rawI = localStorage.getItem(ITEMS_KEY);
+      const parsedI = rawI ? JSON.parse(rawI) : null;
+      if (Array.isArray(parsedI) && parsedI.length) setItems(parsedI as Item[]);
+      const rawF = localStorage.getItem(FAVS_KEY);
+      const parsedF = rawF ? JSON.parse(rawF) : null;
+      if (Array.isArray(parsedF)) setFavorites(new Set(parsedF as string[]));
+    } catch {
+      /* 손상된 저장소 무시 */
+    }
+    setHydrated(true);
+  }, []);
+
+  // 변경 저장 (복원 완료 후에만 → 시드가 저장값을 덮어쓰는 레이스 차단)
+  useEffect(() => {
+    if (!hydrated) return;
+    try {
+      localStorage.setItem(ITEMS_KEY, JSON.stringify(items));
+      localStorage.setItem(FAVS_KEY, JSON.stringify([...favorites]));
+    } catch {
+      /* 저장 실패 무시 */
+    }
+  }, [items, favorites, hydrated]);
 
   const addClothing = useCallback((item: Omit<Item, "id">) => {
     idCounter.current += 1;
-    setItems((prev) => [{ ...item, id: `new-${idCounter.current}` }, ...prev]);
+    setItems((prev) => [{ ...item, id: `new-${Date.now()}-${idCounter.current}` }, ...prev]);
   }, []);
 
   const removeClothing = useCallback((id: string) => {
     setItems((prev) => prev.filter((x) => x.id !== id));
+    setFavorites((prev) => {
+      if (!prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
   }, []);
 
-  useEffect(() => {
-    setReduced(prefersReduced());
+  const restoreClothing = useCallback((item: Item) => {
+    setItems((prev) => (prev.some((x) => x.id === item.id) ? prev : [item, ...prev]));
   }, []);
 
-  const switchView = useCallback((v: ViewName) => {
-    setView(v);
-    if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
+  const setClothingState = useCallback((id: string, state: ClothState) => {
+    setItems((prev) =>
+      prev.map((x) => (x.id === id ? { ...x, state, label: STATE_LABEL[state] } : x))
+    );
   }, []);
+
+  const toggleFavorite = useCallback((id: string) => {
+    setFavorites((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const switchView = useCallback(
+    (v: ViewName) => {
+      setView(v);
+      if (typeof window !== "undefined")
+        window.scrollTo({ top: 0, behavior: reduced ? "auto" : "smooth" });
+    },
+    [reduced]
+  );
 
   const logout = useCallback(() => {
     toast("안전하게 로그아웃했어요");
@@ -92,11 +162,28 @@ export function AppShell({ toast, onLogout }: AppShellProps) {
   useEffect(() => {
     const el = document.getElementById("view-" + view);
     if (!el) return;
-    const ctx = playViewEntrance(el as HTMLElement, reduced);
+    const c = playViewEntrance(el as HTMLElement, reduced);
     return () => {
-      ctx?.revert();
+      c?.revert();
     };
   }, [view, reduced]);
+
+  // 알림 패널: 열리면 읽음 처리(점 제거) + Esc 닫기 + 첫 항목 포커스
+  useEffect(() => {
+    if (!notifOpen) return;
+    setNotifRead(true);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setNotifOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    notifPanelRef.current?.querySelector<HTMLElement>("button")?.focus();
+    return () => window.removeEventListener("keydown", onKey);
+  }, [notifOpen]);
+
+  const laundryCount = useMemo(
+    () => items.filter((x) => x.state === "laundry").length,
+    [items]
+  );
 
   const ctx: AppContextValue = useMemo(
     () => ({
@@ -110,8 +197,26 @@ export function AppShell({ toast, onLogout }: AppShellProps) {
       items,
       addClothing,
       removeClothing,
+      restoreClothing,
+      setClothingState,
+      favorites,
+      toggleFavorite,
     }),
-    [view, switchView, toast, closetQuery, reduced, logout, items, addClothing, removeClothing]
+    [
+      view,
+      switchView,
+      toast,
+      closetQuery,
+      reduced,
+      logout,
+      items,
+      addClothing,
+      removeClothing,
+      restoreClothing,
+      setClothingState,
+      favorites,
+      toggleFavorite,
+    ]
   );
 
   const submitGlobalSearch = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -137,7 +242,12 @@ export function AppShell({ toast, onLogout }: AppShellProps) {
           <div className="nav-label">My wardrobe</div>
           <nav className="nav">
             {NAV1.map((n) => {
-              const cnt = n.v === "closet" ? items.length : n.count;
+              const cnt =
+                n.v === "closet"
+                  ? items.length
+                  : n.v === "care"
+                  ? laundryCount
+                  : n.count;
               return (
                 <button
                   key={n.v}
@@ -208,12 +318,12 @@ export function AppShell({ toast, onLogout }: AppShellProps) {
                 onClick={() => setNotifOpen((o) => !o)}
               >
                 <Icon id="i-bell" />
-                <span className="dot"></span>
+                {!notifRead && <span className="dot"></span>}
               </button>
               {notifOpen && (
                 <>
                   <div className="notif-backdrop" onClick={() => setNotifOpen(false)} />
-                  <div className="notif-panel" role="menu">
+                  <div className="notif-panel" role="dialog" aria-label="알림" ref={notifPanelRef}>
                     <div className="notif-head">
                       알림 <span>{NOTIFS.length}건</span>
                     </div>
@@ -234,7 +344,13 @@ export function AppShell({ toast, onLogout }: AppShellProps) {
                         </span>
                       </button>
                     ))}
-                    <button className="notif-all" onClick={() => setNotifOpen(false)}>
+                    <button
+                      className="notif-all"
+                      onClick={() => {
+                        setNotifRead(true);
+                        setNotifOpen(false);
+                      }}
+                    >
                       모두 읽음으로 표시
                     </button>
                   </div>

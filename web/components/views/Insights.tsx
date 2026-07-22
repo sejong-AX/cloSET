@@ -12,7 +12,10 @@ const BARS = [
 ];
 
 export function InsightsView() {
-  const { toast } = useApp();
+  const { toast, items } = useApp();
+  const total = items.length;
+  const active = items.filter((x) => x.state === "available").length;
+  const war = total ? Math.round((active / total) * 100) : 0;
   return (
     <section className="view active" id="view-insights">
       <div className="page-head">
@@ -33,8 +36,10 @@ export function InsightsView() {
       <div className="metrics" style={{ marginTop: 0 }}>
         <article className="card metric">
           <span className="label">WAR · 30일</span>
-          <strong>68%</strong>
-          <small>활성 옷 24벌 중 16벌</small>
+          <strong>{war}%</strong>
+          <small>
+            활성 옷 {total}벌 중 {active}벌
+          </small>
         </article>
         <article className="card metric">
           <span className="label">평균 CPW</span>
@@ -72,12 +77,17 @@ export function InsightsView() {
         <article className="card chart-card">
           <div className="section-title">
             <h2>옷장 구성</h2>
-            <span>24벌</span>
+            <span>{total}벌</span>
           </div>
           <div className="donut-wrap">
-            <div className="donut">
+            <div
+              className="donut"
+              style={{
+                background: `conic-gradient(var(--forest) 0 ${war}%, #d6ddd9 ${war}% 100%)`,
+              }}
+            >
               <div className="donut-label">
-                <strong>68%</strong>
+                <strong>{war}%</strong>
                 <span>활성 옷장</span>
               </div>
             </div>

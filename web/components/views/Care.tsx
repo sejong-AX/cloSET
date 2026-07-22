@@ -4,20 +4,6 @@ import { useState } from "react";
 import { useApp } from "../app-context";
 import { Icon } from "../Sprite";
 
-interface QueueRow {
-  name: string;
-  meta: string;
-  progress: number;
-  img: string;
-  material: string;
-}
-
-const QUEUE: QueueRow[] = [
-  { name: "네이비 울 니트", meta: "3회 착용 · 임계 3회 도달", progress: 100, img: "/items/knit.jpg", material: "네이비 울 니트" },
-  { name: "베이지 트렌치코트", meta: "우천 착용 · 부분 세탁 권장", progress: 76, img: "/items/coat.jpg", material: "코튼 개버딘 트렌치코트" },
-  { name: "크림 와이드 팬츠", meta: "2회 착용 · 오염 기록 있음", progress: 82, img: "/items/pants.jpg", material: "코튼 와이드 팬츠" },
-];
-
 interface Guide {
   title: string;
   tempC: number;
@@ -32,26 +18,38 @@ const DEFAULT_GUIDE: Guide = {
   body: "찬물에서 울 전용 세제로 손세탁하고 비틀어 짜지 마세요. 평평하게 눕혀 그늘에서 말리는 것이 좋아요.",
 };
 
+const wearNum = (w: string) => parseInt(w.replace(/[^\d]/g, ""), 10) || 0;
+const careNote = (name: string) => {
+  if (/니트|울|캐시미어|스웨터|가디건/.test(name)) return "찬물 손세탁 권장";
+  if (/데님|진|청/.test(name)) return "뒤집어 단독 세탁";
+  if (/코트|트렌치|자켓|재킷|블레이저/.test(name)) return "부분 세탁·드라이 권장";
+  if (/로퍼|부츠|신발|스니커/.test(name)) return "전용 클리너 관리";
+  return "일반 세탁 가능";
+};
+
 export function CareView() {
-  const { toast } = useApp();
-  const [labels, setLabels] = useState<string[]>(QUEUE.map(() => "세탁 시작"));
-  const [primary, setPrimary] = useState<boolean[]>(QUEUE.map(() => false));
+  const { toast, items, setClothingState } = useApp();
+  // 케어 큐 = 옷장에서 실제로 '세탁' 상태인 옷들 (하드코딩 아님 · 옷장과 연동)
+  const queue = items.filter((x) => x.state === "laundry");
+  const [washing, setWashing] = useState<Set<string>>(
+    () => new Set(items.filter((x) => x.label === "세탁 중").map((x) => x.id))
+  );
   const [guide, setGuide] = useState<Guide>(DEFAULT_GUIDE);
   const [scanning, setScanning] = useState(false);
 
-  const toggleCare = (i: number) => {
-    const nextLabel = labels[i] === "세탁 시작" ? "세탁 완료" : "옷장 복귀 완료";
-    setLabels((prev) => {
-      const next = [...prev];
-      next[i] = nextLabel;
+  const startWash = (id: string) => {
+    setWashing((prev) => new Set(prev).add(id));
+    toast("세탁을 시작했어요");
+  };
+
+  const completeWash = (id: string, name: string) => {
+    setWashing((prev) => {
+      const next = new Set(prev);
+      next.delete(id);
       return next;
     });
-    setPrimary((prev) => {
-      const next = [...prev];
-      next[i] = !prev[i];
-      return next;
-    });
-    toast(nextLabel === "세탁 완료" ? "세탁 중 상태로 이동했어요" : "Available 상태로 돌아왔어요");
+    setClothingState(id, "available"); // 옷장 상태를 '입을 수 있음'으로 복귀
+    toast(`'${name}'을(를) 다시 옷장에 넣었어요`);
   };
 
   const labelScan = async () => {
@@ -59,11 +57,13 @@ export function CareView() {
     setScanning(true);
     toast("케어라벨을 분석하고 있어요");
     try {
+      const material = queue[0]?.name ?? "네이비 울 니트";
       const res = await fetch("/api/care", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ material: QUEUE[0].material }),
+        body: JSON.stringify({ material }),
       });
+      if (!res.ok) throw new Error("bad status");
       const data = await res.json();
       setGuide({ title: data.title, tempC: data.tempC, symbols: data.symbols, body: data.body });
       toast(
@@ -94,29 +94,46 @@ export function CareView() {
       <div className="grid queue-layout">
         <article className="card queue">
           <div className="section-title" style={{ paddingTop: "14px" }}>
-            <h2>세탁 필요 · 3벌</h2>
+            <h2>세탁 필요 · {queue.length}벌</h2>
             <span>소재별 임계 기준</span>
           </div>
-          {QUEUE.map((q, i) => (
-            <div className="queue-item" key={q.name}>
-              <div className="thumb">
-                <img src={q.img} alt={q.name} />
-              </div>
-              <div>
-                <b>{q.name}</b>
-                <p>{q.meta}</p>
-                <div className="progress">
-                  <i style={{ width: q.progress + "%" }}></i>
-                </div>
-              </div>
-              <button
-                className={"btn" + (primary[i] ? " primary" : "")}
-                onClick={() => toggleCare(i)}
-              >
-                {labels[i]}
-              </button>
+          {queue.length === 0 ? (
+            <div className="closet-empty" style={{ padding: "34px 10px" }}>
+              <Icon id="i-care" />
+              <b>세탁할 옷이 없어요</b>
+              <p>옷장의 모든 옷이 입을 수 있는 상태예요.</p>
             </div>
-          ))}
+          ) : (
+            queue.map((q) => {
+              const isWashing = washing.has(q.id);
+              const progress = isWashing ? 100 : Math.min(96, 58 + wearNum(q.wear) * 2);
+              return (
+                <div className="queue-item" key={q.id}>
+                  <div className="thumb">
+                    <img src={q.img} alt={q.name} />
+                  </div>
+                  <div>
+                    <b>{q.name}</b>
+                    <p>
+                      {q.wear} 착용 · {isWashing ? "세탁 중" : careNote(q.name)}
+                    </p>
+                    <div className="progress">
+                      <i style={{ width: progress + "%" }}></i>
+                    </div>
+                  </div>
+                  {isWashing ? (
+                    <button className="btn primary" onClick={() => completeWash(q.id, q.name)}>
+                      세탁 완료
+                    </button>
+                  ) : (
+                    <button className="btn" onClick={() => startWash(q.id)}>
+                      세탁 시작
+                    </button>
+                  )}
+                </div>
+              );
+            })
+          )}
         </article>
         <aside className="card guide">
           <div className="guide-icon">{guide.tempC}°</div>

@@ -25,7 +25,7 @@ export function ReuseView() {
       </div>
       <article className="card reuse-hero">
         <div className="reuse-visual">
-          <img src="/items/coat.jpg" alt="브라운 울 코트" />
+          <img src="/items/coat-brown.jpg" alt="브라운 울 코트" />
         </div>
         <div className="reuse-copy">
           <div className="rank">CANDIDATE 01</div>
@@ -54,21 +54,33 @@ export function ReuseView() {
         </div>
       </article>
       <div className="route-grid">
-        {ROUTES.map((r, i) => (
-          <article
-            className={"card route-card" + (selected === i ? " selected" : "")}
-            key={r.name}
-            onClick={() => {
-              setSelected(i);
-              toast(r.name + " 경로를 선택했어요");
-            }}
-          >
-            <div className="route-icon">{r.icon}</div>
-            <b>{r.name}</b>
-            <p>{r.desc}</p>
-            <strong>{r.stat}</strong>
-          </article>
-        ))}
+        {ROUTES.map((r, i) => {
+          const select = () => {
+            setSelected(i);
+            toast(r.name + " 경로를 선택했어요");
+          };
+          return (
+            <article
+              className={"card route-card" + (selected === i ? " selected" : "")}
+              key={r.name}
+              role="button"
+              tabIndex={0}
+              aria-pressed={selected === i}
+              onClick={select}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  select();
+                }
+              }}
+            >
+              <div className="route-icon">{r.icon}</div>
+              <b>{r.name}</b>
+              <p>{r.desc}</p>
+              <strong>{r.stat}</strong>
+            </article>
+          );
+        })}
       </div>
     </section>
   );

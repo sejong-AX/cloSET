@@ -10,6 +10,24 @@ const nextConfig = {
     return [
       { source: "/api/scan", destination: `${RUST_API}/api/scan` },
       { source: "/api/care", destination: `${RUST_API}/api/care` },
+      { source: "/api/style", destination: `${RUST_API}/api/style` },
+    ];
+  },
+  async headers() {
+    return [
+      {
+        source: "/(.*)",
+        headers: [
+          { key: "X-Content-Type-Options", value: "nosniff" },
+          { key: "X-Frame-Options", value: "SAMEORIGIN" },
+          { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+          { key: "X-DNS-Prefetch-Control", value: "on" },
+          {
+            key: "Permissions-Policy",
+            value: "camera=(self), microphone=(), geolocation=()",
+          },
+        ],
+      },
     ];
   },
 };
