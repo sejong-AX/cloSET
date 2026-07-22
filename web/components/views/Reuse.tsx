@@ -25,7 +25,7 @@ export function ReuseView() {
       </div>
       <article className="card reuse-hero">
         <div className="reuse-visual">
-          <div className="garment coat" style={{ background: "#887b6d", transform: "scale(1.15)" }}></div>
+          <img src="/items/coat.jpg" alt="브라운 울 코트" />
         </div>
         <div className="reuse-copy">
           <div className="rank">CANDIDATE 01</div>

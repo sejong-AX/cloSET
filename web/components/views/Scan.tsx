@@ -82,7 +82,7 @@ export function ScanView() {
             <b>상품 사진을 놓거나 클릭하세요</b>
             <span>옷 · 신발 · 액세서리 JPG, PNG</span>
             <div className={"scan-product" + (productShown ? " show" : "")}>
-              <div className="garment top-g"></div>
+              <img src="/items/knit.jpg" alt="스캔한 상품" />
             </div>
           </div>
           <div className="scan-form">

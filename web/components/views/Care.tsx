@@ -8,14 +8,14 @@ interface QueueRow {
   name: string;
   meta: string;
   progress: number;
-  type: string;
+  img: string;
   material: string;
 }
 
 const QUEUE: QueueRow[] = [
-  { name: "네이비 울 니트", meta: "3회 착용 · 임계 3회 도달", progress: 100, type: "top-g", material: "네이비 울 니트" },
-  { name: "베이지 트렌치코트", meta: "우천 착용 · 부분 세탁 권장", progress: 76, type: "coat", material: "코튼 개버딘 트렌치코트" },
-  { name: "크림 와이드 팬츠", meta: "2회 착용 · 오염 기록 있음", progress: 82, type: "pants", material: "코튼 와이드 팬츠" },
+  { name: "네이비 울 니트", meta: "3회 착용 · 임계 3회 도달", progress: 100, img: "/items/knit.jpg", material: "네이비 울 니트" },
+  { name: "베이지 트렌치코트", meta: "우천 착용 · 부분 세탁 권장", progress: 76, img: "/items/coat.jpg", material: "코튼 개버딘 트렌치코트" },
+  { name: "크림 와이드 팬츠", meta: "2회 착용 · 오염 기록 있음", progress: 82, img: "/items/pants.jpg", material: "코튼 와이드 팬츠" },
 ];
 
 interface Guide {
@@ -100,7 +100,7 @@ export function CareView() {
           {QUEUE.map((q, i) => (
             <div className="queue-item" key={q.name}>
               <div className="thumb">
-                <div className={"garment " + q.type}></div>
+                <img src={q.img} alt={q.name} />
               </div>
               <div>
                 <b>{q.name}</b>

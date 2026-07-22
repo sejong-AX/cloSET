@@ -65,6 +65,7 @@ export function ClosetView() {
       color: "#eee8dc",
       wear: "0회",
       cpw: "₩59,000",
+      img: "/items/shirt.jpg",
     });
     setModalOpen(false);
     toast("새 옷을 Available 상태로 등록했어요");
@@ -124,7 +125,7 @@ export function ClosetView() {
           >
             <div className="cloth-photo" style={{ background: x.bg }}>
               <span className="state-badge">{x.label}</span>
-              <div className={"garment " + x.type} style={{ background: x.color }}></div>
+              <img className="cloth-img" src={x.img} alt={x.name} loading="lazy" />
             </div>
             <div className="cloth-body">
               <div className="cloth-title">

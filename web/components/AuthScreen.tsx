@@ -53,15 +53,20 @@ export function AuthScreen({ onEnter, toast }: AuthScreenProps) {
     }
     setShowError(false);
     setBusy(true);
-    setLoginLabel(signupMode ? "계정을 만들고 있어요…" : "안전하게 로그인하고 있어요…");
+    const wasSignup = signupMode;
+    setLoginLabel(wasSignup ? "계정을 만들고 있어요…" : "안전하게 로그인하고 있어요…");
     setTimeout(() => {
       setBusy(false);
-      setLoginLabel(signupMode ? "계정 만들기" : "로그인");
-      onEnter(
-        signupMode
-          ? "cloSET에 오신 걸 환영해요. 첫 옷장을 준비할게요."
-          : "로그인했어요. 오늘의 착장을 준비했어요."
-      );
+      if (wasSignup) {
+        // 회원가입 완료 → 앱에 바로 들어가지 않고 로그인 화면으로 복귀
+        setSignupMode(false);
+        setLoginLabel("로그인");
+        setPassword("");
+        toast("회원가입이 완료됐어요. 다시 로그인해 주세요.");
+      } else {
+        setLoginLabel("로그인");
+        onEnter("로그인했어요. 오늘의 착장을 준비했어요.");
+      }
     }, 550);
   };
 
