@@ -1,7 +1,7 @@
-import { proxyToRust } from "@/lib/proxy";
+import { handleProxy } from "@/lib/proxy";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
-  return proxyToRust("/api/style", await req.text());
+  return handleProxy(req, "/api/style", 30);
 }
