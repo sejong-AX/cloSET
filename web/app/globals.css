@@ -117,6 +117,44 @@ button,input,select{font:inherit}button{color:inherit}svg{display:block}.hidden{
 .bs-reco-title{font-size:10px;font-weight:800;color:var(--sub);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px}
 .bs-reco{display:flex;flex-wrap:wrap;gap:7px}
 .bs-chip{font-size:11px;font-weight:700;color:var(--forest);background:var(--mint);border:1px solid #cfe3da;padding:6px 12px;border-radius:999px}
+/* 사진으로 옷장 채우기 모달 */
+.modal.wardrobe-scan{width:min(680px,100%)}
+.closet-empty-actions{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
+.ws-pick{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:18px 0 4px}
+.ws-pick-card{display:flex;flex-direction:column;align-items:center;gap:5px;text-align:center;padding:22px 14px;border:1.5px dashed #a9c2b8;background:#f4f8f6;border-radius:14px;cursor:pointer;color:var(--ink);transition:.15s}
+.ws-pick-card:hover{background:var(--mint);border-color:var(--forest)}
+.ws-pick-card b{font-size:13px}
+.ws-pick-card span:last-child{font-size:10px;color:var(--sub);line-height:1.5}
+.ws-emoji{font-size:26px}
+.ws-analyzing{display:flex;flex-direction:column;align-items:center;gap:8px;padding:34px 10px 24px;text-align:center}
+.ws-analyzing b{font-size:13px}
+.ws-analyzing span{font-size:11px;color:var(--sub)}
+.ws-spinner{width:34px;height:34px;border-radius:50%;border:3px solid #d9e4df;border-top-color:var(--forest);animation:ws-spin .8s linear infinite}
+@keyframes ws-spin{to{transform:rotate(360deg)}}
+.ws-bar{width:min(280px,80%);height:6px;background:#e2ece7;border-radius:99px;overflow:hidden;margin-top:4px}
+.ws-bar i{display:block;height:100%;background:var(--forest);border-radius:99px;transition:width .3s}
+.ws-empty{text-align:center;padding:26px 10px 10px}
+.ws-empty b{font-size:14px}
+.ws-empty p{font-size:11px;color:var(--sub);margin-top:4px}
+.ws-empty .modal-actions{justify-content:center;margin-top:16px}
+.ws-review-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:16px 0 10px;font-size:11px;color:var(--sub)}
+.ws-review-head b{color:var(--forest)}
+.ws-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;max-height:min(46vh,360px);overflow-y:auto;padding:2px 4px 2px 2px}
+@media(max-width:560px){.ws-pick{grid-template-columns:1fr}.ws-grid{grid-template-columns:1fr}}
+.ws-card{position:relative;display:flex;gap:10px;align-items:center;padding:9px;border:1.5px solid #e2ece7;border-radius:12px;background:#fff;transition:.15s}
+.ws-card.on{border-color:var(--forest);background:#f6faf8}
+.ws-check{position:absolute;top:7px;right:7px;z-index:1}
+.ws-check input{width:17px;height:17px;accent-color:var(--forest);cursor:pointer}
+.ws-thumb{width:52px;height:52px;border-radius:9px;overflow:hidden;flex-shrink:0;background:#eef0ec}
+.ws-thumb img{width:100%;height:100%;object-fit:cover}
+.ws-fields{display:flex;flex-direction:column;gap:5px;min-width:0;flex:1;padding-right:20px}
+.ws-row{display:flex;gap:5px}
+.ws-name{width:100%;border:1px solid #dbe4df;border-radius:8px;padding:6px 8px;font-size:12px;font-weight:700;color:var(--ink);background:#fff}
+.ws-cat{flex:1;min-width:0;border:1px solid #dbe4df;border-radius:8px;padding:5px 6px;font-size:11px;color:var(--sub);background:#fff}
+.ws-fit{color:var(--forest);font-weight:600}
+.ws-name:focus,.ws-cat:focus{outline:2px solid var(--forest);outline-offset:1px;border-color:var(--forest)}
+/* 옷장 카드: 핏 태그로 색·종류가 비슷한 옷을 구분 */
+.fit-tag{display:inline-block;margin-left:6px;padding:1px 7px;border-radius:999px;background:var(--mint);color:var(--forest);font-size:9px;font-weight:800;vertical-align:middle}
 /* 지표 보조 텍스트 대비 상향(WCAG AA) */
 .metric small{color:#2f7355}
 .metric small.down{color:#3a6274}

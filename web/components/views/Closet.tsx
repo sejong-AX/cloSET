@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useApp } from "../app-context";
 import { Icon } from "../Sprite";
+import { WardrobeScanModal } from "../WardrobeScanModal";
 import type { ClothState, Item } from "@/lib/data";
 
 const FILTER_DEFS: { key: string; name: string }[] = [
@@ -47,6 +48,7 @@ export function ClosetView() {
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<SortKey>(null);
   const [modalOpen, setModalOpen] = useState(false);
+  const [scanOpen, setScanOpen] = useState(false);
   const [newName, setNewName] = useState("오프화이트 셔츠");
   const [category, setCategory] = useState("상의");
   const [location, setLocation] = useState("옷장 1");
@@ -205,8 +207,9 @@ export function ClosetView() {
           <p>상태와 위치가 연결된 살아 있는 옷장이에요.</p>
         </div>
         <div className="head-actions">
-          <button className="btn" onClick={() => toast("구매내역 가져오기 화면을 열었어요")}>
-            구매내역 가져오기
+          <button className="btn" onClick={() => setScanOpen(true)}>
+            <Icon id="i-scan" />
+            사진으로 채우기
           </button>
           <button className="btn primary" onClick={() => setModalOpen(true)}>
             <Icon id="i-plus" />새 옷 등록
@@ -260,9 +263,15 @@ export function ClosetView() {
               : "검색어나 필터를 바꿔보세요."}
           </p>
           {items.length === 0 ? (
-            <button className="btn primary" onClick={() => setModalOpen(true)}>
-              <Icon id="i-plus" />새 옷 등록
-            </button>
+            <div className="closet-empty-actions">
+              <button className="btn" onClick={() => setScanOpen(true)}>
+                <Icon id="i-scan" />
+                사진으로 채우기
+              </button>
+              <button className="btn primary" onClick={() => setModalOpen(true)}>
+                <Icon id="i-plus" />새 옷 등록
+              </button>
+            </div>
           ) : (
             <button
               className="btn"
@@ -317,7 +326,10 @@ export function ClosetView() {
                       {fav ? "♥" : "♡"}
                     </button>
                   </div>
-                  <p>{x.cat}</p>
+                  <p>
+                    {x.cat}
+                    {x.fit ? <span className="fit-tag">{x.fit}</span> : null}
+                  </p>
                   <div className="cloth-stats">
                     <span>
                       착용<b>{x.wear}</b>
@@ -440,6 +452,16 @@ export function ClosetView() {
           </div>
         </div>
       </div>
+
+      <WardrobeScanModal
+        open={scanOpen}
+        onClose={() => setScanOpen(false)}
+        onAdded={() => {
+          setFilter("all");
+          setSearch("");
+          setSort(null);
+        }}
+      />
     </section>
   );
 }

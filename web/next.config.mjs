@@ -11,6 +11,7 @@ const nextConfig = {
       { source: "/api/scan", destination: `${RUST_API}/api/scan` },
       { source: "/api/care", destination: `${RUST_API}/api/care` },
       { source: "/api/style", destination: `${RUST_API}/api/style` },
+      { source: "/api/wardrobe", destination: `${RUST_API}/api/wardrobe` },
     ];
   },
   async headers() {

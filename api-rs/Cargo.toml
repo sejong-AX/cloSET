@@ -33,6 +33,10 @@ path = "api/care.rs"
 name = "style"
 path = "api/style.rs"
 
+[[bin]]
+name = "wardrobe"
+path = "api/wardrobe.rs"
+
 # 로컬/포터블 axum 서버 (cargo run --features server --bin server)
 [[bin]]
 name = "server"

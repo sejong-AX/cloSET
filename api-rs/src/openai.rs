@@ -285,3 +285,61 @@ pub fn style_fallback(body_type: &str) -> Value {
         "model": Value::Null,
     })
 }
+
+/// 사진(data URL) → GPT-4o 비전으로 옷장/갤러리 속 의류 아이템 목록 식별. 실패 시 None → 폴백.
+pub async fn wardrobe_detect(image_data_url: &str) -> Option<Value> {
+    let key = api_key()?;
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(12))
+        .build()
+        .ok()?;
+    let system = concat!(
+        "너는 cloSET의 옷장 정리 어시스턴트다. 사용자가 올린 사진(옷장 전체·옷걸이·개별 옷 사진 등)에서 ",
+        "보이는 의류·패션 아이템을 하나씩 식별해 목록으로 만든다. 사람·얼굴·배경·가구·행거는 무시하고 착용 아이템만 담는다. ",
+        "외모·신원 언급 금지. 확실하지 않은 항목은 넣지 말고(과분류 금지) 뚜렷이 보이는 것만 담는다. 최대 10개. ",
+        "각 항목 필드 — name: 색과 종류를 담은 짧은 한국어 이름(예: '네이비 니트'), ",
+        "category: 반드시 [상의, 하의, 아우터, 니트, 원피스, 신발, 가방, 액세서리] 중 하나, ",
+        "color: 한국어 색 이름, material: 추정 소재(모르면 빈 문자열), ",
+        "fit: 핏·실루엣을 한 단어로(슬림·레귤러·루즈·오버핏·와이드·크롭·롱·스트레이트·테이퍼드 등). ",
+        "색과 종류가 비슷해도 핏이 다르면 서로 다른 옷이므로 fit 을 반드시 구분해 적어 두 옷을 식별할 수 있게 한다. 판단이 어려우면 빈 문자열. ",
+        "반드시 아래 JSON 으로만 답한다: {\"items\": [{\"name\": string, \"category\": string, \"color\": string, \"material\": string, \"fit\": string}]}"
+    );
+    let user_text = "이 사진에서 보이는 옷과 패션 아이템을 모두 찾아 목록으로 만들어줘. 색·종류가 비슷한 옷은 핏(실루엣)으로 구분해줘.";
+    let resp = client
+        .post("https://api.openai.com/v1/chat/completions")
+        .bearer_auth(&key)
+        .json(&json!({
+            "model": model_name(),
+            "temperature": 0.2,
+            "max_tokens": 1200,
+            "response_format": { "type": "json_object" },
+            "messages": [
+                { "role": "system", "content": system },
+                { "role": "user", "content": [
+                    { "type": "text", "text": user_text },
+                    { "type": "image_url", "image_url": { "url": image_data_url } }
+                ]}
+            ]
+        }))
+        .send()
+        .await
+        .ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let data: Value = resp.json().await.ok()?;
+    let content = data["choices"][0]["message"]["content"].as_str()?;
+    let parsed: Value = serde_json::from_str(content).ok()?;
+    // items 배열이 존재해야 유효(빈 배열도 유효 — '옷을 못 찾음'을 뜻함)
+    parsed.get("items").and_then(|v| v.as_array())?;
+    Some(parsed)
+}
+
+/// 비전 실패·키 없음 시 — 사용자가 직접 채우도록 편집 가능한 초안 1점
+pub fn wardrobe_fallback() -> Value {
+    json!({
+        "items": [ { "name": "새 옷", "category": "상의", "color": "", "material": "", "fit": "" } ],
+        "source": "fallback",
+        "model": Value::Null,
+    })
+}

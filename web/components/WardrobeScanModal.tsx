@@ -1,0 +1,518 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+import { useApp } from "./app-context";
+import { Icon } from "./Sprite";
+import type { ClothState } from "@/lib/data";
+
+interface Props {
+  open: boolean;
+  onClose: () => void;
+  onAdded?: () => void;
+}
+
+interface RawItem {
+  name?: string;
+  category?: string;
+  color?: string;
+  material?: string;
+  fit?: string;
+}
+interface Draft {
+  id: string;
+  thumb: string;
+  name: string;
+  category: string;
+  color: string;
+  material: string;
+  fit: string;
+  checked: boolean;
+}
+
+const CATEGORY_OPTIONS = ["상의", "니트", "하의", "아우터", "원피스", "신발", "가방", "액세서리"];
+// 색·종류가 비슷한 옷을 핏으로 구분한다
+const FIT_OPTIONS = [
+  "",
+  "레귤러",
+  "슬림",
+  "루즈",
+  "오버핏",
+  "와이드",
+  "크롭",
+  "롱",
+  "스트레이트",
+  "테이퍼드",
+];
+
+const CAT_META: Record<string, { type: string; bg: string; color: string }> = {
+  상의: { type: "top-g", bg: "#eef0ec", color: "#cfd6d0" },
+  니트: { type: "top-g", bg: "#ece7db", color: "#cbbfa6" },
+  하의: { type: "pants", bg: "#e2e7ec", color: "#6b83a0" },
+  아우터: { type: "coat", bg: "#efe9de", color: "#d8c9ad" },
+  원피스: { type: "top-g", bg: "#efe6e2", color: "#c8a9a0" },
+  신발: { type: "shoe", bg: "#eee5da", color: "#9a7d63" },
+  가방: { type: "bag", bg: "#e9e2d8", color: "#9a8a72" },
+  액세서리: { type: "acc", bg: "#e8e4ea", color: "#9a90a8" },
+};
+
+// 비전이 돌려준 카테고리를 앱이 아는 8종으로 정규화
+function normalizeCat(raw?: string): string {
+  const r = (raw ?? "").trim();
+  if (CATEGORY_OPTIONS.includes(r)) return r;
+  if (/아우터|코트|자[켓캣]|재킷|점퍼|패딩|블레이저|바람막이/.test(r)) return "아우터";
+  if (/니트|스웨터|가디건|풀오버/.test(r)) return "니트";
+  if (/원피스|드레스/.test(r)) return "원피스";
+  if (/신발|슈즈|스니커즈|운동화|부츠|로퍼|구두|샌들|힐/.test(r)) return "신발";
+  if (/가방|백팩|백|숄더|토트|클러치/.test(r)) return "가방";
+  if (/액세서리|모자|캡|스카프|벨트|목도리|머플러|장갑|양말|주얼리|안경|선글라스/.test(r))
+    return "액세서리";
+  if (/하의|팬츠|바지|슬랙스|스커트|치마|청바지|데님|반바지|조거/.test(r)) return "하의";
+  return "상의";
+}
+
+// 비전이 돌려준 핏 표현을 편집 가능한 선택지로 정규화(모르면 빈 값)
+function normalizeFit(raw?: string): string {
+  const r = (raw ?? "").trim();
+  if (FIT_OPTIONS.includes(r)) return r;
+  if (/오버|박시|루즈핏|오버사이즈/.test(r)) return "오버핏";
+  if (/슬림|스키니|타이트|핏된/.test(r)) return "슬림";
+  if (/루즈|릴렉스|여유/.test(r)) return "루즈";
+  if (/와이드|통넓은/.test(r)) return "와이드";
+  if (/크롭|짧은 기장/.test(r)) return "크롭";
+  if (/롱|긴 기장|롱기장/.test(r)) return "롱";
+  if (/스트레이트|일자/.test(r)) return "스트레이트";
+  if (/테이퍼|아래로 좁아/.test(r)) return "테이퍼드";
+  if (/레귤러|스탠다드|기본|보통/.test(r)) return "레귤러";
+  return "";
+}
+
+// 한 번의 이미지 로드로 분석용(큰)·썸네일용(작은) data URL 두 개 생성
+function scale(img: HTMLImageElement, max: number, q: number): string {
+  const s = Math.min(1, max / Math.max(img.width, img.height));
+  const w = Math.max(1, Math.round(img.width * s));
+  const h = Math.max(1, Math.round(img.height * s));
+  const c = document.createElement("canvas");
+  c.width = w;
+  c.height = h;
+  const cx = c.getContext("2d");
+  if (!cx) return img.src;
+  cx.drawImage(img, 0, 0, w, h);
+  return c.toDataURL("image/jpeg", q);
+}
+function downscale(file: File): Promise<{ analyzeUrl: string; thumbUrl: string }> {
+  return new Promise((resolve, reject) => {
+    if (!file.type.startsWith("image/")) {
+      reject(new Error("type"));
+      return;
+    }
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("read"));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error("img"));
+      img.onload = () =>
+        resolve({ analyzeUrl: scale(img, 768, 0.82), thumbUrl: scale(img, 384, 0.62) });
+      img.src = reader.result as string;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+const POOL = 3; // 동시 분석 상한(rate-limit·부하 완화)
+
+export function WardrobeScanModal({ open, onClose, onAdded }: Props) {
+  const { addClothing, toast } = useApp();
+  const [phase, setPhase] = useState<"pick" | "analyzing" | "review">("pick");
+  const [progress, setProgress] = useState({ done: 0, total: 0 });
+  const [drafts, setDrafts] = useState<Draft[]>([]);
+  const [aiCount, setAiCount] = useState(0);
+  const [skipped, setSkipped] = useState(0);
+  const cameraRef = useRef<HTMLInputElement>(null);
+  const galleryRef = useRef<HTMLInputElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLElement | null>(null);
+  const seq = useRef(0);
+  const busy = useRef(false);
+  const appendRef = useRef(false); // '사진 더 넣기' 로 이어붙일지
+
+  const reset = () => {
+    setPhase("pick");
+    setProgress({ done: 0, total: 0 });
+    setDrafts([]);
+    setAiCount(0);
+    setSkipped(0);
+    seq.current = 0;
+    busy.current = false;
+    appendRef.current = false;
+  };
+
+  const closeAll = () => {
+    reset();
+    onClose();
+  };
+
+  // Esc 로 닫기(분석 중에는 무시) — reset 을 거쳐 stale draft 재추가 방지
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && phase !== "analyzing") closeAll();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, phase]);
+
+  // 열림: 포커스 이동 + 닫힘 시 트리거로 복귀
+  useEffect(() => {
+    if (!open) return;
+    triggerRef.current = document.activeElement as HTMLElement | null;
+    const t = setTimeout(
+      () => dialogRef.current?.querySelector<HTMLElement>("button,input,select")?.focus(),
+      0
+    );
+    return () => {
+      clearTimeout(t);
+      const el = triggerRef.current;
+      if (el && document.contains(el)) el.focus();
+    };
+  }, [open]);
+
+  const trapTab = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== "Tab") return;
+    const nodes = dialogRef.current?.querySelectorAll<HTMLElement>(
+      'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])'
+    );
+    if (!nodes || nodes.length === 0) return;
+    const first = nodes[0];
+    const last = nodes[nodes.length - 1];
+    const active = document.activeElement;
+    if (e.shiftKey && active === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && active === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  };
+
+  async function detect(dataUrl: string): Promise<RawItem[]> {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 20000);
+    try {
+      const res = await fetch("/api/wardrobe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ image: dataUrl }),
+        signal: ctrl.signal,
+      });
+      if (!res.ok) throw new Error("status");
+      const data = await res.json();
+      const items: RawItem[] = Array.isArray(data?.items) ? data.items : [];
+      return items.slice(0, 10).filter((x) => x && typeof x.name === "string" && x.name.trim());
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  const makeDraft = (thumb: string, it: RawItem): Draft => ({
+    id: `d-${seq.current++}`,
+    thumb,
+    name: (it.name ?? "").trim() || "새 옷",
+    category: normalizeCat(it.category),
+    color: (it.color ?? "").trim(),
+    material: (it.material ?? "").trim(),
+    fit: normalizeFit(it.fit),
+    checked: true,
+  });
+
+  const runAnalyze = async (files: File[], append: boolean) => {
+    if (busy.current || files.length === 0) return;
+    busy.current = true;
+    setPhase("analyzing");
+    setProgress({ done: 0, total: files.length });
+    // append 면 기존 검수 목록·편집을 보존한 채 이어붙인다
+    const collected: Draft[] = append ? [...drafts] : [];
+    if (!append) {
+      setDrafts([]);
+      setAiCount(0);
+      setSkipped(0);
+      seq.current = 0;
+    }
+    let done = 0;
+    let detected = 0;
+    let localSkipped = 0;
+
+    const worker = async (start: number) => {
+      for (let i = start; i < files.length; i += POOL) {
+        const file = files[i];
+        try {
+          const { analyzeUrl, thumbUrl } = await downscale(file);
+          let items: RawItem[] = [];
+          try {
+            items = await detect(analyzeUrl);
+          } catch {
+            items = [];
+          }
+          if (items.length === 0) {
+            // 옷을 못 찾았거나 분석 실패 → 사진을 잃지 않도록 편집 초안 1점
+            collected.push(makeDraft(thumbUrl, { name: "새 옷", category: "상의" }));
+          } else {
+            detected += items.length;
+            for (const it of items) collected.push(makeDraft(thumbUrl, it));
+          }
+        } catch {
+          // 이미지가 아니거나(HEIC 등) 로드 실패 → 건너뛰고 집계
+          localSkipped += 1;
+        } finally {
+          done += 1;
+          setProgress({ done, total: files.length });
+        }
+      }
+    };
+
+    await Promise.all(
+      Array.from({ length: Math.min(POOL, files.length) }, (_, k) => worker(k))
+    );
+    setDrafts(collected);
+    setAiCount((prev) => (append ? prev : 0) + detected);
+    setSkipped((prev) => (append ? prev : 0) + localSkipped);
+    if (localSkipped > 0) {
+      toast(`${localSkipped}장은 읽을 수 없는 형식이라 건너뛰었어요`);
+    }
+    setPhase("review");
+    busy.current = false;
+  };
+
+  const onPick = (list: FileList | null) => {
+    const files = list ? Array.from(list).slice(0, 20) : [];
+    const append = appendRef.current;
+    appendRef.current = false;
+    if (files.length) runAnalyze(files, append);
+  };
+
+  const checkedCount = drafts.filter((d) => d.checked).length;
+  const allChecked = drafts.length > 0 && checkedCount === drafts.length;
+
+  const patch = (id: string, up: Partial<Draft>) =>
+    setDrafts((prev) => prev.map((d) => (d.id === id ? { ...d, ...up } : d)));
+
+  const addSelected = () => {
+    const chosen = drafts.filter((d) => d.checked);
+    if (!chosen.length) {
+      toast("추가할 옷을 하나 이상 선택해 주세요");
+      return;
+    }
+    for (const d of chosen) {
+      const meta = CAT_META[d.category] ?? CAT_META["상의"];
+      addClothing({
+        name: d.name.trim() || "새 옷",
+        cat: `${d.category} · 옷장`,
+        state: "available" as ClothState,
+        label: "입을 수 있음",
+        bg: meta.bg,
+        type: meta.type,
+        color: meta.color,
+        wear: "0회",
+        cpw: "—",
+        img: d.thumb,
+        daysAgo: 0,
+        fit: d.fit || undefined,
+      });
+    }
+    toast(`${chosen.length}점을 옷장에 추가했어요`);
+    onAdded?.();
+    reset();
+    onClose();
+  };
+
+  if (!open) return null;
+
+  return (
+    <div
+      className="modal-back show"
+      onClick={(e) => {
+        if (e.target === e.currentTarget && phase !== "analyzing") closeAll();
+      }}
+    >
+      <div
+        className="modal wardrobe-scan"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="wsTitle"
+        ref={dialogRef}
+        onKeyDown={trapTab}
+      >
+        <h2 id="wsTitle">사진으로 옷장 채우기</h2>
+        <p>
+          옷장을 촬영하거나 갤러리 사진을 고르면 AI가 사진 속 옷을 찾아 목록으로 만들어요. 고른 옷의
+          축소 썸네일은 옷장 항목 이미지로 이 기기에만 저장되고, 원본 사진은 분석에만 쓰여요.
+        </p>
+
+        <input
+          ref={cameraRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          className="hidden"
+          onChange={(e) => {
+            onPick(e.target.files);
+            e.target.value = "";
+          }}
+        />
+        <input
+          ref={galleryRef}
+          type="file"
+          accept="image/*"
+          multiple
+          className="hidden"
+          onChange={(e) => {
+            onPick(e.target.files);
+            e.target.value = "";
+          }}
+        />
+
+        {phase === "pick" && (
+          <>
+            <div className="ws-pick">
+              <button className="ws-pick-card" onClick={() => cameraRef.current?.click()}>
+                <span className="ws-emoji">📷</span>
+                <b>옷장 촬영</b>
+                <span>한 장에서 여러 벌을 한 번에 인식</span>
+              </button>
+              <button className="ws-pick-card" onClick={() => galleryRef.current?.click()}>
+                <span className="ws-emoji">🖼️</span>
+                <b>갤러리에서 선택</b>
+                <span>여러 장을 골라 한꺼번에 등록</span>
+              </button>
+            </div>
+            <div className="modal-actions">
+              <button className="btn" onClick={closeAll}>
+                {drafts.length ? "검수로 돌아가기" : "닫기"}
+              </button>
+            </div>
+          </>
+        )}
+
+        {phase === "analyzing" && (
+          <div className="ws-analyzing" role="status" aria-live="polite">
+            <div className="ws-spinner" aria-hidden="true" />
+            <b>사진을 분석하고 있어요…</b>
+            <span>
+              {progress.done} / {progress.total} 장 완료
+            </span>
+            <div className="ws-bar">
+              <i
+                style={{
+                  width: `${progress.total ? (progress.done / progress.total) * 100 : 0}%`,
+                }}
+              />
+            </div>
+          </div>
+        )}
+
+        {phase === "review" &&
+          (drafts.length === 0 ? (
+            <div className="ws-empty">
+              <b>{skipped > 0 ? "사진을 읽을 수 없어요" : "사진에서 옷을 찾지 못했어요"}</b>
+              <p>
+                {skipped > 0
+                  ? "HEIC 등 지원하지 않는 형식일 수 있어요. JPG·PNG 사진으로 다시 시도해 보세요."
+                  : "옷이 잘 보이는 사진으로 다시 시도해 보세요."}
+              </p>
+              <div className="modal-actions">
+                <button className="btn" onClick={closeAll}>
+                  닫기
+                </button>
+                <button className="btn primary" onClick={() => setPhase("pick")}>
+                  다시 시도
+                </button>
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className="ws-review-head" role="status" aria-live="polite">
+                <span>
+                  {aiCount > 0
+                    ? `옷 ${drafts.length}점을 찾았어요`
+                    : "인식이 어려워 초안을 만들었어요"}{" "}
+                  · <b>{checkedCount}</b>점 선택됨
+                  {skipped > 0 && ` · ${skipped}장 건너뜀`}
+                </span>
+                <button
+                  className="text-link"
+                  onClick={() =>
+                    setDrafts((prev) => prev.map((d) => ({ ...d, checked: !allChecked })))
+                  }
+                >
+                  {allChecked ? "전체 해제" : "전체 선택"}
+                </button>
+              </div>
+              <div className="ws-grid">
+                {drafts.map((d) => (
+                  <div className={"ws-card" + (d.checked ? " on" : "")} key={d.id}>
+                    <label className="ws-check">
+                      <input
+                        type="checkbox"
+                        checked={d.checked}
+                        onChange={(e) => patch(d.id, { checked: e.target.checked })}
+                        aria-label={`${d.name} 선택`}
+                      />
+                    </label>
+                    <div className="ws-thumb">
+                      <img src={d.thumb} alt={d.name} />
+                    </div>
+                    <div className="ws-fields">
+                      <input
+                        className="ws-name"
+                        value={d.name}
+                        aria-label="옷 이름"
+                        onChange={(e) => patch(d.id, { name: e.target.value })}
+                      />
+                      <div className="ws-row">
+                        <select
+                          className="ws-cat"
+                          value={d.category}
+                          aria-label="카테고리"
+                          onChange={(e) => patch(d.id, { category: e.target.value })}
+                        >
+                          {CATEGORY_OPTIONS.map((c) => (
+                            <option key={c}>{c}</option>
+                          ))}
+                        </select>
+                        <select
+                          className="ws-cat ws-fit"
+                          value={d.fit}
+                          aria-label="핏"
+                          onChange={(e) => patch(d.id, { fit: e.target.value })}
+                        >
+                          {FIT_OPTIONS.map((f) => (
+                            <option key={f || "none"} value={f}>
+                              {f || "핏 미지정"}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="modal-actions">
+                <button
+                  className="btn"
+                  onClick={() => {
+                    appendRef.current = true;
+                    setPhase("pick");
+                  }}
+                >
+                  사진 더 넣기
+                </button>
+                <button className="btn primary" onClick={addSelected}>
+                  선택 {checkedCount}점 옷장에 추가
+                </button>
+              </div>
+            </>
+          ))}
+      </div>
+    </div>
+  );
+}

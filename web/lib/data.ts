@@ -13,6 +13,7 @@ export interface Item {
   cpw: string;
   img: string;
   daysAgo: number; // 마지막 착용일(안정값, 렌더 인덱스 아님)
+  fit?: string; // 핏·실루엣(슬림·오버핏 등) — 색·종류가 비슷한 옷을 구분
 }
 
 // 상태 → 라벨 매핑(케어 완료 등 상태 변경 시 라벨 일관성 유지)

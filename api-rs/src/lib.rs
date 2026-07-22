@@ -106,3 +106,19 @@ pub async fn style_response(payload: &Value) -> Value {
     }
     openai::style_fallback(&body_type)
 }
+
+/// POST /api/wardrobe 응답. payload: { image?: data-url }
+/// 사진(옷장·갤러리) 속 의류 아이템을 GPT-4o 비전으로 식별, 실패 시 편집용 초안 1점.
+pub async fn wardrobe_response(payload: &Value) -> Value {
+    if let Some(img) = payload.get("image").and_then(|v| v.as_str()) {
+        if img.starts_with("data:image") && img.len() < 8_000_000 {
+            if let Some(v) = openai::wardrobe_detect(img).await {
+                let mut out = v;
+                out["source"] = json!("openai");
+                out["model"] = json!(openai::model_name());
+                return out;
+            }
+        }
+    }
+    openai::wardrobe_fallback()
+}

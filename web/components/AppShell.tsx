@@ -82,6 +82,7 @@ export function AppShell({ toast, onLogout }: AppShellProps) {
   const [notifRead, setNotifRead] = useState(false);
   const [hydrated, setHydrated] = useState(false);
   const idCounter = useRef(0);
+  const quotaWarned = useRef(false);
   const notifPanelRef = useRef<HTMLDivElement | null>(null);
 
   // 저장소 복원 (마운트 후 — SSR 하이드레이션 불일치 방지)
@@ -106,13 +107,20 @@ export function AppShell({ toast, onLogout }: AppShellProps) {
       localStorage.setItem(ITEMS_KEY, JSON.stringify(items));
       localStorage.setItem(FAVS_KEY, JSON.stringify([...favorites]));
     } catch {
-      /* 저장 실패 무시 */
+      // 용량 초과 등 저장 실패 — 사일런트 방지로 1회 안내(사진 일괄 등록 시 썸네일 누적)
+      if (!quotaWarned.current) {
+        quotaWarned.current = true;
+        toast("옷장 저장 공간이 가득 찼어요. 최근 변경은 이번 세션에만 유지돼요.");
+      }
     }
-  }, [items, favorites, hydrated]);
+  }, [items, favorites, hydrated, toast]);
 
   const addClothing = useCallback((item: Omit<Item, "id">) => {
     idCounter.current += 1;
-    setItems((prev) => [{ ...item, id: `new-${Date.now()}-${idCounter.current}` }, ...prev]);
+    // id 는 호출 시점에 확정한다. updater 안에서 idCounter 를 읽으면 여러 건을
+    // 한 배치로 추가할 때(사진 일괄 등록) 모든 updater 가 최종 카운터 값을 읽어 키가 충돌한다.
+    const id = `new-${Date.now()}-${idCounter.current}`;
+    setItems((prev) => [{ ...item, id }, ...prev]);
   }, []);
 
   const removeClothing = useCallback((id: string) => {
