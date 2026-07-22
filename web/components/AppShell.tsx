@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppContext, type AppContextValue } from "./app-context";
 import { Icon } from "./Sprite";
 import { initialItems, viewTitles, type Item, type ViewName } from "@/lib/data";
@@ -39,6 +39,18 @@ const MNAV: NavItem[] = [
   { v: "settings", icon: "i-set", label: "마이" },
 ];
 
+interface Notif {
+  icon: string;
+  title: string;
+  time: string;
+  view: ViewName;
+}
+const NOTIFS: Notif[] = [
+  { icon: "🧺", title: "네이비 울 니트가 세탁 임계(3회)에 도달했어요", time: "2시간 전", view: "care" },
+  { icon: "♻️", title: "브라운 울 코트를 126일째 안 입었어요 — 순환을 제안해요", time: "어제", view: "reuse" },
+  { icon: "☂️", title: "오후 비 확률 70% — 트렌치가 포함된 조합을 추천했어요", time: "오전 8:10", view: "home" },
+];
+
 interface AppShellProps {
   toast: (msg: string) => void;
   onLogout: () => void;
@@ -50,9 +62,16 @@ export function AppShell({ toast, onLogout }: AppShellProps) {
   const [globalSearch, setGlobalSearch] = useState("");
   const [reduced, setReduced] = useState(false);
   const [items, setItems] = useState<Item[]>(initialItems);
+  const [notifOpen, setNotifOpen] = useState(false);
+  const idCounter = useRef(0);
 
-  const addClothing = useCallback((item: Item) => {
-    setItems((prev) => [item, ...prev]);
+  const addClothing = useCallback((item: Omit<Item, "id">) => {
+    idCounter.current += 1;
+    setItems((prev) => [{ ...item, id: `new-${idCounter.current}` }, ...prev]);
+  }, []);
+
+  const removeClothing = useCallback((id: string) => {
+    setItems((prev) => prev.filter((x) => x.id !== id));
   }, []);
 
   useEffect(() => {
@@ -90,8 +109,9 @@ export function AppShell({ toast, onLogout }: AppShellProps) {
       logout,
       items,
       addClothing,
+      removeClothing,
     }),
-    [view, switchView, toast, closetQuery, reduced, logout, items, addClothing]
+    [view, switchView, toast, closetQuery, reduced, logout, items, addClothing, removeClothing]
   );
 
   const submitGlobalSearch = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -180,10 +200,47 @@ export function AppShell({ toast, onLogout }: AppShellProps) {
                 onKeyDown={submitGlobalSearch}
               />
             </label>
-            <button className="icon-btn" aria-label="알림" onClick={() => toast("새 알림 2건이 있어요")}>
-              <Icon id="i-bell" />
-              <span className="dot"></span>
-            </button>
+            <div className="notif-wrap">
+              <button
+                className="icon-btn"
+                aria-label="알림"
+                aria-expanded={notifOpen}
+                onClick={() => setNotifOpen((o) => !o)}
+              >
+                <Icon id="i-bell" />
+                <span className="dot"></span>
+              </button>
+              {notifOpen && (
+                <>
+                  <div className="notif-backdrop" onClick={() => setNotifOpen(false)} />
+                  <div className="notif-panel" role="menu">
+                    <div className="notif-head">
+                      알림 <span>{NOTIFS.length}건</span>
+                    </div>
+                    {NOTIFS.map((n, i) => (
+                      <button
+                        className="notif-item"
+                        key={i}
+                        onClick={() => {
+                          setNotifOpen(false);
+                          switchView(n.view);
+                          toast("알림에서 이동했어요");
+                        }}
+                      >
+                        <span className="notif-ico">{n.icon}</span>
+                        <span className="notif-body">
+                          <b>{n.title}</b>
+                          <span>{n.time}</span>
+                        </span>
+                      </button>
+                    ))}
+                    <button className="notif-all" onClick={() => setNotifOpen(false)}>
+                      모두 읽음으로 표시
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
           </header>
           <div className="content">
             {view === "home" && <HomeView />}

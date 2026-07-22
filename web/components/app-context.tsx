@@ -12,7 +12,8 @@ export interface AppContextValue {
   reducedMotion: boolean;
   logout: () => void;
   items: Item[];
-  addClothing: (item: Item) => void;
+  addClothing: (item: Omit<Item, "id">) => void;
+  removeClothing: (id: string) => void;
 }
 
 export const AppContext = createContext<AppContextValue | null>(null);

@@ -13,12 +13,28 @@ const FILTER_DEFS: { key: string; name: string }[] = [
   { key: "reuse", name: "순환 후보" },
 ];
 
+// 새 옷 등록 시 카테고리별 기본 사진·표기
+const CATEGORY_META: Record<string, { type: string; img: string; bg: string; color: string }> = {
+  상의: { type: "top-g", img: "/items/shirt-white.jpg", bg: "#eef0ec", color: "#e7e5dc" },
+  하의: { type: "pants", img: "/items/pants.jpg", bg: "#e2e7ec", color: "#6b83a0" },
+  아우터: { type: "coat", img: "/items/cardigan-ivory.jpg", bg: "#efe9de", color: "#e3d8c2" },
+  신발: { type: "shoe", img: "/items/shoe.jpg", bg: "#eee5da", color: "#765c48" },
+};
+
+const parsePrice = (s: string) => {
+  const n = parseInt(s.replace(/[^\d]/g, ""), 10);
+  return isFinite(n) ? n : 0;
+};
+
 export function ClosetView() {
-  const { toast, closetQuery, setClosetQuery, items, addClothing } = useApp();
+  const { toast, closetQuery, setClosetQuery, items, addClothing, removeClothing } = useApp();
   const [filter, setFilter] = useState<string>("all");
   const [search, setSearch] = useState("");
   const [modalOpen, setModalOpen] = useState(false);
   const [newName, setNewName] = useState("오프화이트 셔츠");
+  const [category, setCategory] = useState("상의");
+  const [location, setLocation] = useState("옷장 1");
+  const [price, setPrice] = useState("59,000원");
 
   // 전역 검색(상단바)에서 넘어온 검색어 반영
   useEffect(() => {
@@ -55,20 +71,30 @@ export function ClosetView() {
   }, [items, filter, search]);
 
   const addItem = () => {
+    const name = newName.trim() || "새 옷";
+    const meta = CATEGORY_META[category] ?? CATEGORY_META["상의"];
+    const won = parsePrice(price);
     addClothing({
-      name: newName,
-      cat: "상의 · 옷장 1",
+      name,
+      cat: `${category} · ${location}`,
       state: "available" as ClothState,
       label: "입을 수 있음",
-      bg: "#eee9df",
-      type: "top-g",
-      color: "#eee8dc",
+      bg: meta.bg,
+      type: meta.type,
+      color: meta.color,
       wear: "0회",
-      cpw: "₩59,000",
-      img: "/items/shirt.jpg",
+      cpw: `₩${won.toLocaleString("en-US")}`,
+      img: meta.img,
     });
     setModalOpen(false);
-    toast("새 옷을 Available 상태로 등록했어요");
+    setFilter("all");
+    setSearch("");
+    toast(`'${name}'을(를) 옷장에 추가했어요`);
+  };
+
+  const deleteItem = (id: string, name: string) => {
+    removeClothing(id);
+    toast(`'${name}'을(를) 옷장에서 삭제했어요`);
   };
 
   return (
@@ -120,11 +146,21 @@ export function ClosetView() {
           <article
             className="card cloth-card"
             data-state={x.state}
-            key={x.name + i}
+            key={x.id}
             onClick={() => toast("옷 상세 목업: 상태·착용·케어·코디 탭으로 이동합니다")}
           >
             <div className="cloth-photo" style={{ background: x.bg }}>
               <span className="state-badge">{x.label}</span>
+              <button
+                className="cloth-del"
+                aria-label={`${x.name} 삭제`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  deleteItem(x.id, x.name);
+                }}
+              >
+                <Icon id="i-trash" />
+              </button>
               <img className="cloth-img" src={x.img} alt={x.name} loading="lazy" />
             </div>
             <div className="cloth-body">
@@ -167,7 +203,7 @@ export function ClosetView() {
             </div>
             <div className="field">
               <label>카테고리</label>
-              <select defaultValue="상의">
+              <select value={category} onChange={(e) => setCategory(e.target.value)}>
                 <option>상의</option>
                 <option>하의</option>
                 <option>아우터</option>
@@ -176,15 +212,16 @@ export function ClosetView() {
             </div>
             <div className="field">
               <label>위치</label>
-              <select defaultValue="옷장 1">
+              <select value={location} onChange={(e) => setLocation(e.target.value)}>
                 <option>옷장 1</option>
                 <option>옷장 2</option>
                 <option>계절 보관함</option>
+                <option>신발장</option>
               </select>
             </div>
             <div className="field">
               <label>구매 가격</label>
-              <input defaultValue="59,000원" />
+              <input value={price} onChange={(e) => setPrice(e.target.value)} />
             </div>
           </div>
           <div className="modal-actions">
