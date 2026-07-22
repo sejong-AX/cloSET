@@ -40,10 +40,10 @@ export function CareView() {
   const [scanning, setScanning] = useState(false);
 
   const toggleCare = (i: number) => {
+    const nextLabel = labels[i] === "세탁 시작" ? "세탁 완료" : "옷장 복귀 완료";
     setLabels((prev) => {
       const next = [...prev];
-      next[i] = prev[i] === "세탁 시작" ? "세탁 완료" : "옷장 복귀 완료";
-      toast(next[i] === "세탁 완료" ? "세탁 중 상태로 이동했어요" : "Available 상태로 돌아왔어요");
+      next[i] = nextLabel;
       return next;
     });
     setPrimary((prev) => {
@@ -51,6 +51,7 @@ export function CareView() {
       next[i] = !prev[i];
       return next;
     });
+    toast(nextLabel === "세탁 완료" ? "세탁 중 상태로 이동했어요" : "Available 상태로 돌아왔어요");
   };
 
   const labelScan = async () => {

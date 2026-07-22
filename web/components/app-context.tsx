@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useContext } from "react";
-import type { ViewName } from "@/lib/data";
+import type { ViewName, Item } from "@/lib/data";
 
 export interface AppContextValue {
   view: ViewName;
@@ -11,6 +11,8 @@ export interface AppContextValue {
   setClosetQuery: (q: string) => void;
   reducedMotion: boolean;
   logout: () => void;
+  items: Item[];
+  addClothing: (item: Item) => void;
 }
 
 export const AppContext = createContext<AppContextValue | null>(null);

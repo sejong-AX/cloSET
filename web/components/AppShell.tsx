@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AppContext, type AppContextValue } from "./app-context";
 import { Icon } from "./Sprite";
-import { viewTitles, type ViewName } from "@/lib/data";
+import { initialItems, viewTitles, type Item, type ViewName } from "@/lib/data";
 import { playViewEntrance, prefersReduced } from "@/lib/anim";
 import { HomeView } from "./views/Home";
 import { ClosetView } from "./views/Closet";
@@ -49,6 +49,11 @@ export function AppShell({ toast, onLogout }: AppShellProps) {
   const [closetQuery, setClosetQuery] = useState("");
   const [globalSearch, setGlobalSearch] = useState("");
   const [reduced, setReduced] = useState(false);
+  const [items, setItems] = useState<Item[]>(initialItems);
+
+  const addClothing = useCallback((item: Item) => {
+    setItems((prev) => [item, ...prev]);
+  }, []);
 
   useEffect(() => {
     setReduced(prefersReduced());
@@ -75,8 +80,18 @@ export function AppShell({ toast, onLogout }: AppShellProps) {
   }, [view, reduced]);
 
   const ctx: AppContextValue = useMemo(
-    () => ({ view, switchView, toast, closetQuery, setClosetQuery, reducedMotion: reduced, logout }),
-    [view, switchView, toast, closetQuery, reduced, logout]
+    () => ({
+      view,
+      switchView,
+      toast,
+      closetQuery,
+      setClosetQuery,
+      reducedMotion: reduced,
+      logout,
+      items,
+      addClothing,
+    }),
+    [view, switchView, toast, closetQuery, reduced, logout, items, addClothing]
   );
 
   const submitGlobalSearch = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -101,17 +116,20 @@ export function AppShell({ toast, onLogout }: AppShellProps) {
           </div>
           <div className="nav-label">My wardrobe</div>
           <nav className="nav">
-            {NAV1.map((n) => (
-              <button
-                key={n.v}
-                className={view === n.v ? "active" : ""}
-                onClick={() => switchView(n.v)}
-              >
-                <Icon id={n.icon} />
-                {n.label}
-                {n.count !== undefined && <span className="count">{n.count}</span>}
-              </button>
-            ))}
+            {NAV1.map((n) => {
+              const cnt = n.v === "closet" ? items.length : n.count;
+              return (
+                <button
+                  key={n.v}
+                  className={view === n.v ? "active" : ""}
+                  onClick={() => switchView(n.v)}
+                >
+                  <Icon id={n.icon} />
+                  {n.label}
+                  {cnt !== undefined && <span className="count">{cnt}</span>}
+                </button>
+              );
+            })}
           </nav>
           <div className="nav-label" style={{ marginTop: "20px" }}>
             Account

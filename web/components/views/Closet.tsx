@@ -3,19 +3,18 @@
 import { useEffect, useMemo, useState } from "react";
 import { useApp } from "../app-context";
 import { Icon } from "../Sprite";
-import { initialItems, type Item, type ClothState } from "@/lib/data";
+import type { ClothState } from "@/lib/data";
 
-const FILTERS: { key: string; label: string }[] = [
-  { key: "all", label: "전체 24" },
-  { key: "available", label: "입을 수 있음 17" },
-  { key: "laundry", label: "세탁 3" },
-  { key: "stored", label: "보관 2" },
-  { key: "reuse", label: "순환 후보 2" },
+const FILTER_DEFS: { key: string; name: string }[] = [
+  { key: "all", name: "전체" },
+  { key: "available", name: "입을 수 있음" },
+  { key: "laundry", name: "세탁" },
+  { key: "stored", name: "보관" },
+  { key: "reuse", name: "순환 후보" },
 ];
 
 export function ClosetView() {
-  const { toast, closetQuery, setClosetQuery } = useApp();
-  const [items, setItems] = useState<Item[]>(initialItems);
+  const { toast, closetQuery, setClosetQuery, items, addClothing } = useApp();
   const [filter, setFilter] = useState<string>("all");
   const [search, setSearch] = useState("");
   const [modalOpen, setModalOpen] = useState(false);
@@ -30,6 +29,25 @@ export function ClosetView() {
     }
   }, [closetQuery, setClosetQuery]);
 
+  // 모달 Esc 로 닫기
+  useEffect(() => {
+    if (!modalOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setModalOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [modalOpen]);
+
+  // 칩 라벨 수치를 실제 데이터에서 계산(하드코딩 24/17… 불일치 제거)
+  const counts = useMemo(() => {
+    const c: Record<string, number> = { all: items.length };
+    for (const f of FILTER_DEFS) {
+      if (f.key !== "all") c[f.key] = items.filter((x) => x.state === f.key).length;
+    }
+    return c;
+  }, [items]);
+
   const list = useMemo(() => {
     let out = filter === "all" ? items : items.filter((x) => x.state === filter);
     if (search) out = out.filter((x) => (x.name + x.cat).includes(search));
@@ -37,20 +55,17 @@ export function ClosetView() {
   }, [items, filter, search]);
 
   const addItem = () => {
-    setItems((prev) => [
-      {
-        name: newName,
-        cat: "상의 · 옷장 1",
-        state: "available" as ClothState,
-        label: "입을 수 있음",
-        bg: "#eee9df",
-        type: "top-g",
-        color: "#eee8dc",
-        wear: "0회",
-        cpw: "₩59,000",
-      },
-      ...prev,
-    ]);
+    addClothing({
+      name: newName,
+      cat: "상의 · 옷장 1",
+      state: "available" as ClothState,
+      label: "입을 수 있음",
+      bg: "#eee9df",
+      type: "top-g",
+      color: "#eee8dc",
+      wear: "0회",
+      cpw: "₩59,000",
+    });
     setModalOpen(false);
     toast("새 옷을 Available 상태로 등록했어요");
   };
@@ -59,7 +74,7 @@ export function ClosetView() {
     <section className="view active" id="view-closet">
       <div className="page-head">
         <div>
-          <div className="eyebrow">MY CLOSET · 24 ITEMS</div>
+          <div className="eyebrow">MY CLOSET · {items.length} ITEMS</div>
           <h1>내 옷장</h1>
           <p>상태와 위치가 연결된 살아 있는 옷장이에요.</p>
         </div>
@@ -73,13 +88,13 @@ export function ClosetView() {
         </div>
       </div>
       <div className="stat-chips">
-        {FILTERS.map((f) => (
+        {FILTER_DEFS.map((f) => (
           <button
             key={f.key}
             className={"chip" + (filter === f.key ? " active" : "")}
             onClick={() => setFilter(f.key)}
           >
-            {f.label}
+            {f.name} {counts[f.key] ?? 0}
           </button>
         ))}
       </div>

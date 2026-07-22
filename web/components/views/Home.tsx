@@ -98,11 +98,9 @@ export function HomeView() {
                 className="icon-btn"
                 aria-label="코디 저장"
                 onClick={() => {
-                  setSaved((s) => {
-                    const next = !s;
-                    toast(next ? "코디를 저장했어요" : "저장을 해제했어요");
-                    return next;
-                  });
+                  const next = !saved;
+                  setSaved(next);
+                  toast(next ? "코디를 저장했어요" : "저장을 해제했어요");
                 }}
               >
                 {saved ? "♥" : "♡"}

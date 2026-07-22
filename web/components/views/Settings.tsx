@@ -11,12 +11,13 @@ export function SettingsView() {
   const [toggles, setToggles] = useState<boolean[]>([true, true, true]);
 
   const toggle = (i: number) => {
+    const next = !toggles[i];
     setToggles((prev) => {
-      const next = [...prev];
-      next[i] = !prev[i];
-      toast(next[i] ? "연동을 켰어요" : "연동을 껐어요");
-      return next;
+      const n = [...prev];
+      n[i] = next;
+      return n;
     });
+    toast(next ? "연동을 켰어요" : "연동을 껐어요");
   };
 
   return (
