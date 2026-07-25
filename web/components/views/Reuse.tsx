@@ -2,12 +2,42 @@
 
 import { useState } from "react";
 import { useApp } from "../app-context";
+import { directionParticle } from "@/lib/data";
 
+// 각 경로는 실제 서비스로 연결된다(새 탭)
 const ROUTES = [
-  { icon: "↗", name: "중고 판매", desc: "상태와 비슷한 거래를 기준으로 예상 가격을 확인해요.", stat: "₩62,000 예상" },
-  { icon: "♡", name: "기부", desc: "가까운 수거처와 필요한 계절 품목을 연결해요.", stat: "수거처 3곳" },
-  { icon: "✦", name: "수선 후 재착용", desc: "단추와 안감을 보완하면 다음 겨울까지 입을 수 있어요.", stat: "수선 ₩24,000 예상" },
-  { icon: "∞", name: "업사이클", desc: "울 소재를 활용하는 지역 공방에 전달할 수 있어요.", stat: "파트너 2곳" },
+  {
+    icon: "↗",
+    name: "중고 판매",
+    desc: "상태와 비슷한 거래를 기준으로 예상 가격을 확인해요.",
+    stat: "₩62,000 예상",
+    partner: "당근",
+    url: "https://www.daangn.com",
+  },
+  {
+    icon: "♡",
+    name: "기부",
+    desc: "가까운 수거처와 필요한 계절 품목을 연결해요.",
+    stat: "수거처 3곳",
+    partner: "아름다운가게",
+    url: "https://www.beautifulstore.org",
+  },
+  {
+    icon: "✦",
+    name: "수선 후 재착용",
+    desc: "단추와 안감을 보완하면 다음 겨울까지 입을 수 있어요.",
+    stat: "수선 ₩24,000 예상",
+    partner: "카카오맵 · 내 주변 수선샵",
+    url: "https://map.kakao.com/?q=" + encodeURIComponent("옷수선"),
+  },
+  {
+    icon: "∞",
+    name: "업사이클",
+    desc: "울 소재를 활용하는 지역 공방에 전달할 수 있어요.",
+    stat: "파트너 2곳",
+    partner: "서울새활용플라자",
+    url: "https://www.seoulup.or.kr",
+  },
 ];
 
 export function ReuseView() {
@@ -57,15 +87,16 @@ export function ReuseView() {
         {ROUTES.map((r, i) => {
           const select = () => {
             setSelected(i);
-            toast(r.name + " 경로를 선택했어요");
+            window.open(r.url, "_blank", "noopener,noreferrer");
+            toast(`${r.partner}${directionParticle(r.partner)} 연결했어요`);
           };
           return (
             <article
               className={"card route-card" + (selected === i ? " selected" : "")}
               key={r.name}
-              role="button"
+              role="link"
               tabIndex={0}
-              aria-pressed={selected === i}
+              aria-label={`${r.name} — ${r.partner} 새 탭으로 열기`}
               onClick={select}
               onKeyDown={(e) => {
                 if (e.key === "Enter" || e.key === " ") {
@@ -78,6 +109,7 @@ export function ReuseView() {
               <b>{r.name}</b>
               <p>{r.desc}</p>
               <strong>{r.stat}</strong>
+              <span className="route-partner">{r.partner} ↗</span>
             </article>
           );
         })}

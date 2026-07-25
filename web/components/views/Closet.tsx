@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useApp } from "../app-context";
 import { Icon } from "../Sprite";
 import { WardrobeScanModal } from "../WardrobeScanModal";
-import type { ClothState, Item } from "@/lib/data";
+import { objectParticle, type ClothState, type Item } from "@/lib/data";
 
 const FILTER_DEFS: { key: string; name: string }[] = [
   { key: "all", name: "전체" },
@@ -41,6 +41,9 @@ export function ClosetView() {
     addClothing,
     removeClothing,
     restoreClothing,
+    trash,
+    restoreFromTrash,
+    purgeTrash,
     favorites,
     toggleFavorite,
   } = useApp();
@@ -49,6 +52,7 @@ export function ClosetView() {
   const [sort, setSort] = useState<SortKey>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [scanOpen, setScanOpen] = useState(false);
+  const [trashOpen, setTrashOpen] = useState(false);
   const [newName, setNewName] = useState("오프화이트 셔츠");
   const [category, setCategory] = useState("상의");
   const [location, setLocation] = useState("옷장 1");
@@ -162,6 +166,11 @@ export function ClosetView() {
 
   const addItem = () => {
     const name = newName.trim() || "새 옷";
+    // 구매 가격은 금액 형식만 허용(₩/콤마/원) — "코튼 100%" 같은 임의 텍스트 차단
+    if (price.trim() && !/^\s*₩?\s*\d[\d,.]*\s*원?\s*$/.test(price)) {
+      toast("구매 가격은 숫자로 입력해 주세요 (예: 59,000원)");
+      return;
+    }
     const meta = CATEGORY_META[category] ?? CATEGORY_META["상의"];
     addClothing({
       name,
@@ -181,16 +190,36 @@ export function ClosetView() {
     setModalOpen(false);
     setFilter("all");
     setSearch("");
-    toast(`'${name}'을(를) 옷장에 추가했어요`);
+    toast(`'${name}'${objectParticle(name)} 옷장에 추가했어요`);
   };
 
   const deleteItem = (item: Item) => {
-    removeClothing(item.id);
-    toast(`'${item.name}'을(를) 옷장에서 삭제했어요`, {
+    removeClothing(item); // 휴지통으로 이동 — 나중에도 복원 가능
+    toast(`'${item.name}'${objectParticle(item.name)} 휴지통으로 옮겼어요`, {
       label: "되돌리기",
       onAction: () => restoreClothing(item),
     });
   };
+
+  // 휴지통 삭제 시각 표기
+  const timeAgo = (t: number) => {
+    const m = Math.floor((Date.now() - t) / 60000);
+    if (m < 1) return "방금";
+    if (m < 60) return `${m}분 전`;
+    const h = Math.floor(m / 60);
+    if (h < 24) return `${h}시간 전`;
+    return `${Math.floor(h / 24)}일 전`;
+  };
+
+  // 휴지통 모달 Esc 닫기
+  useEffect(() => {
+    if (!trashOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setTrashOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [trashOpen]);
 
   const toggleSort = (key: Exclude<SortKey, null>, onMsg: string) => {
     const next = sort === key ? null : key;
@@ -251,6 +280,14 @@ export function ClosetView() {
           onClick={() => toggleSort("cpw", "회당 비용 낮은 순으로 정렬했어요")}
         >
           회당 비용 낮은 순
+        </button>
+        <button
+          className="btn trash-open"
+          aria-haspopup="dialog"
+          onClick={() => setTrashOpen(true)}
+        >
+          <Icon id="i-trash" />
+          휴지통 {trash.length > 0 ? trash.length : ""}
         </button>
       </div>
       {list.length === 0 ? (
@@ -452,6 +489,78 @@ export function ClosetView() {
           </div>
         </div>
       </div>
+
+      {trashOpen && (
+        <div
+          className="modal-back show"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setTrashOpen(false);
+          }}
+        >
+          <div className="modal trash-modal" role="dialog" aria-modal="true" aria-labelledby="trashTitle">
+            <h2 id="trashTitle">휴지통</h2>
+            <p>삭제한 옷은 여기에 최근 20점까지 보관돼요. 언제든 옷장으로 복원할 수 있어요.</p>
+            {trash.length === 0 ? (
+              <div className="trash-empty">
+                <Icon id="i-trash" />
+                <b>휴지통이 비어 있어요</b>
+                <span>옷 카드의 삭제 버튼으로 지운 옷이 여기에 모여요.</span>
+              </div>
+            ) : (
+              <div className="trash-list">
+                {trash.map((e) => (
+                  <div className="trash-row" key={e.item.id}>
+                    <div className="trash-thumb">
+                      <img src={e.item.img} alt={e.item.name} />
+                    </div>
+                    <div className="trash-info">
+                      <b>{e.item.name}</b>
+                      <span>
+                        {e.item.cat} · {timeAgo(e.deletedAt)} 삭제
+                      </span>
+                    </div>
+                    <button
+                      className="btn primary"
+                      onClick={() => {
+                        restoreFromTrash(e.item.id);
+                        toast(`'${e.item.name}'${objectParticle(e.item.name)} 옷장으로 복원했어요`);
+                      }}
+                    >
+                      복원
+                    </button>
+                    <button
+                      className="btn"
+                      aria-label={`${e.item.name} 영구 삭제`}
+                      onClick={() => {
+                        purgeTrash(e.item.id);
+                        toast("영구 삭제했어요");
+                      }}
+                    >
+                      영구 삭제
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="modal-actions">
+              {trash.length > 0 && (
+                <button
+                  className="btn"
+                  onClick={() => {
+                    purgeTrash();
+                    toast("휴지통을 비웠어요");
+                  }}
+                >
+                  모두 비우기
+                </button>
+              )}
+              <button className="btn primary" onClick={() => setTrashOpen(false)}>
+                닫기
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <WardrobeScanModal
         open={scanOpen}

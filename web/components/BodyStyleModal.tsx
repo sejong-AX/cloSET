@@ -112,7 +112,7 @@ export function BodyStyleModal({ open, onClose, toast, bodyType, season }: Props
       setResult(data);
       toast(
         data.source === "openai"
-          ? "GPT-4o가 사진을 분석해 추천했어요"
+          ? "AI가 사진을 분석해 추천했어요"
           : "체형 기준으로 추천했어요"
       );
     } catch {

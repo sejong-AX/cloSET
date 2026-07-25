@@ -24,9 +24,41 @@ pub fn proxy_authorized(provided: Option<&str>) -> bool {
 /// Vercel/서버리스 요청 본문 상한(base64 data URL + JSON). Vercel 본문 한도(~4.5MB) 이내로 정렬.
 const MAX_IMAGE_BYTES: usize = 4_000_000;
 
-/// POST /api/scan 응답. payload: { category?: string, price?: string|number }
+/// 클라이언트가 보낸 내 옷장 요약을 파싱한다(상한·필드 검증 포함).
+fn parse_wardrobe(payload: &Value) -> Vec<rules::WardrobeRef> {
+    let Some(arr) = payload.get("wardrobe").and_then(|v| v.as_array()) else {
+        return Vec::new();
+    };
+    arr.iter()
+        .take(48)
+        .map(|it| {
+            let color_raw = it.get("color").and_then(|v| v.as_str()).unwrap_or("");
+            rules::WardrobeRef {
+                name: cap(it.get("name").and_then(|v| v.as_str()).unwrap_or("이름 없는 옷"), 40),
+                type_key: cap(it.get("type").and_then(|v| v.as_str()).unwrap_or(""), 12),
+                color: if color_raw.starts_with('#') && color_raw.len() <= 9 {
+                    color_raw.to_string()
+                } else {
+                    String::new()
+                },
+                wear: it
+                    .get("wear")
+                    .map(|v| match v {
+                        Value::Number(n) => n.as_u64().unwrap_or(0) as u32,
+                        Value::String(s) => s.chars().filter(|c| c.is_ascii_digit()).collect::<String>().parse().unwrap_or(0),
+                        _ => 0,
+                    })
+                    .unwrap_or(0),
+            }
+        })
+        .collect()
+}
+
+/// POST /api/scan 응답.
+/// payload: { category?, price?, image?: data-url, wardrobe?: [{name,type,color,wear}] }
+/// 사진이 있으면 비전으로 상품(이름·카테고리·대표색)을 식별하고, 실옷장 목록으로 결정적 판정한다.
 pub async fn scan_response(payload: &Value, authorized: bool) -> Value {
-    let category = cap(
+    let category_in = cap(
         payload
             .get("category")
             .and_then(|v| v.as_str())
@@ -41,9 +73,36 @@ pub async fn scan_response(payload: &Value, authorized: bool) -> Value {
         },
         20,
     );
-    let facts = rules::evaluate_scan(&category, &price);
+    let wardrobe = parse_wardrobe(payload);
+
+    // 1) 비전 상품 인식(사진이 있을 때) — 실패해도 입력 카테고리로 계속 진행
+    let product = if authorized {
+        match payload.get("image").and_then(|v| v.as_str()) {
+            Some(img) if img.starts_with("data:image") && img.len() < MAX_IMAGE_BYTES => {
+                openai::scan_detect_product(img).await
+            }
+            _ => None,
+        }
+    } else {
+        None
+    };
+    let product_name = product.as_ref().and_then(|p| p.get("name")).and_then(|v| v.as_str()).map(|s| cap(s, 40));
+    let product_category = product.as_ref().and_then(|p| p.get("category")).and_then(|v| v.as_str()).map(|s| cap(s, 20));
+    let product_color = product
+        .as_ref()
+        .and_then(|p| p.get("colorHex"))
+        .and_then(|v| v.as_str())
+        .filter(|s| s.starts_with('#'))
+        .map(|s| cap(s, 9));
+    let product_color_label = product.as_ref().and_then(|p| p.get("color")).and_then(|v| v.as_str()).map(|s| cap(s, 20));
+
+    // 2) 결정적 판정 — 사진에서 읽은 카테고리가 있으면 그것이 우선(사진과 다른 드롭다운 값 교정)
+    let category_eff = product_category.clone().unwrap_or_else(|| category_in.clone());
+    let facts = rules::evaluate_scan_v3(&category_eff, &price, product_color.as_deref(), &wardrobe);
+
+    // 3) 이유 문장(LLM은 표현만)
     let llm = if authorized {
-        openai::scan_llm_copy(&facts).await
+        openai::scan_llm_copy(&facts, product_name.as_deref()).await
     } else {
         None
     };
@@ -60,7 +119,16 @@ pub async fn scan_response(payload: &Value, authorized: bool) -> Value {
         "ruleVersion": facts.rule_version,
         "expectedCpw": facts.expected_cpw,
         "expectedWears": facts.expected_wears,
-        "similar": facts.similar.iter().map(|s| json!({"name": s.name, "color": s.color, "similarity": s.similarity})).collect::<Vec<_>>(),
+        "similar": facts.similar.iter().map(|s| json!({"name": s.name, "color": s.color, "similarity": s.similarity, "ref": s.wardrobe_ref})).collect::<Vec<_>>(),
+        "product": match &product {
+            Some(_) => json!({
+                "name": product_name,
+                "category": category_eff,
+                "color": product_color_label,
+                "colorHex": product_color,
+            }),
+            None => Value::Null,
+        },
         "headline": headline,
         "reasons": reasons.iter().map(|(t, s)| json!({"title": t, "sub": s})).collect::<Vec<_>>(),
         "alt": alt,
