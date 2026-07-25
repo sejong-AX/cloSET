@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState } from "react";
 import gsap from "gsap";
-import { Icon } from "./Sprite";
 
 interface AuthScreenProps {
   onEnter: (message?: string) => void;
@@ -88,10 +87,7 @@ export function AuthScreen({ onEnter, toast }: AuthScreenProps) {
     <section className="auth-screen" id="authScreen" aria-labelledby="authTitle" ref={rootRef}>
       <div className="auth-brand-panel">
         <div className="auth-logo">
-          <div className="brandmark">
-            <Icon id="i-closet" />
-          </div>
-          cloSET
+          <img src="/brand/closet-logo-dark.png" alt="cloSET" />
         </div>
         <div className="auth-message">
           <div className="auth-kicker">REMEMBER · CARE · CIRCULATE</div>
