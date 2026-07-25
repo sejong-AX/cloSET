@@ -4,8 +4,10 @@ import { useEffect, useRef, useState } from "react";
 import { useApp } from "./app-context";
 import { Icon } from "./Sprite";
 import type { ClothState } from "@/lib/data";
-import { cropDataUrl, loadOriented, scaleImage, type Box } from "@/lib/image";
+import { cropDataUrl, dominantHex, loadOriented, scaleImage, type Box } from "@/lib/image";
 import { resolveCategory } from "@/lib/garment";
+import { garmentArtDataUrl, resolveColor } from "@/lib/garment-art";
+import { matchGarmentPhoto } from "@/lib/garment-catalog";
 
 interface Props {
   open: boolean;
@@ -17,20 +19,26 @@ interface RawItem {
   name?: string;
   category?: string;
   color?: string;
+  colorHex?: string;
   material?: string;
   fit?: string;
   /** 접혀 있거나 개켜져 있는지 — 접힌 바지를 상의로 오인하지 않게 서버가 함께 판단한다 */
   folded?: boolean;
   /** 서버가 카테고리를 교정했을 때의 원래 값 */
   categoryFrom?: string;
-  box?: Box; // 품목이 사진에서 차지하는 영역(백분율) — 품목별 썸네일 크롭에 사용
+  box?: Box; // 품목이 사진에서 차지하는 영역(백분율) — 색 추출·근거 사진에 사용
 }
 interface Draft {
   id: string;
+  /** 목록에 보이는 이미지 — 그 옷 한 점만 담긴 실제 사진(카탈로그) 또는 만든 그림 */
   thumb: string;
+  /** 사진에서 잘라낸 원본(근거) — 목록 썸네일로는 쓰지 않는다 */
+  source?: string;
+  /** 실제 사진을 찾았는지 — 사용자에게 근거를 보여준다 */
+  real: boolean;
   name: string;
   category: string;
-  color: string;
+  color: string; // 최종 대표색 hex
   material: string;
   fit: string;
   checked: boolean;
@@ -39,8 +47,9 @@ interface Draft {
   correctedFrom?: string;
 }
 
-// 액세서리(선글라스 포함)는 분석·등록 대상에서 제외한다
-const CATEGORY_OPTIONS = ["상의", "니트", "하의", "아우터", "원피스", "신발", "가방"];
+// 가방·액세서리(선글라스 등)는 분석·등록 대상에서 제외한다 — 옷만 관리한다
+const CATEGORY_OPTIONS = ["상의", "니트", "하의", "아우터", "원피스", "신발"];
+const SKIP_CATEGORIES = ["가방", "액세서리"];
 // 색·종류가 비슷한 옷을 핏으로 구분한다
 const FIT_OPTIONS = [
   "",
@@ -55,16 +64,24 @@ const FIT_OPTIONS = [
   "테이퍼드",
 ];
 
-const CAT_META: Record<string, { type: string; bg: string; color: string }> = {
-  상의: { type: "top-g", bg: "#eef0ec", color: "#cfd6d0" },
-  니트: { type: "top-g", bg: "#ece7db", color: "#cbbfa6" },
-  하의: { type: "pants", bg: "#e2e7ec", color: "#6b83a0" },
-  아우터: { type: "coat", bg: "#efe9de", color: "#d8c9ad" },
-  원피스: { type: "top-g", bg: "#efe6e2", color: "#c8a9a0" },
-  신발: { type: "shoe", bg: "#eee5da", color: "#9a7d63" },
-  가방: { type: "bag", bg: "#e9e2d8", color: "#9a8a72" },
-  액세서리: { type: "acc", bg: "#e8e4ea", color: "#9a90a8" },
+const CAT_META: Record<string, { type: string; bg: string }> = {
+  상의: { type: "top-g", bg: "#eef0ec" },
+  니트: { type: "top-g", bg: "#ece7db" },
+  하의: { type: "pants", bg: "#e2e7ec" },
+  아우터: { type: "coat", bg: "#efe9de" },
+  원피스: { type: "top-g", bg: "#efe6e2" },
+  신발: { type: "shoe", bg: "#eee5da" },
 };
+
+/**
+ * 옷 한 점을 대표할 이미지 한 장.
+ * 1순위 = 종류·색이 맞는 실제 단품 사진(카탈로그), 2순위 = 그 옷과 비슷하게 만든 그림.
+ * 옷장 사진에서 잘라낸 크롭은 옆 옷·옷걸이가 함께 담기므로 목록 썸네일로 쓰지 않는다.
+ */
+function pickImage(name: string, category: string, color: string, fit?: string) {
+  const photo = matchGarmentPhoto({ name, category, color });
+  return { src: photo ?? garmentArtDataUrl({ name, category, color, fit }), real: !!photo };
+}
 
 // 카테고리 판정은 lib/garment 의 결정적 규칙을 그대로 쓴다(서버 rules.rs 와 동일 규칙).
 // 이름에 '슬랙스·바지' 같은 확정 명사가 있으면 모델이 준 카테고리를 이긴다.
@@ -198,18 +215,30 @@ export function WardrobeScanModal({ open, onClose, onAdded }: Props) {
     }
   }
 
-  const makeDraft = (thumb: string, it: RawItem): Draft => {
+  const makeDraft = (it: RawItem, source?: string, sampled?: string | null): Draft => {
     const name = (it.name ?? "").trim() || "새 옷";
     const category = normalizeCat(it.category, name);
     const from = (it.categoryFrom ?? it.category ?? "").trim();
+    const fit = normalizeFit(it.fit);
+    // 색은 이름의 색 단어 → 모델이 준 hex → 사진에서 잰 대표색 순으로 정한다
+    const color = resolveColor({
+      name,
+      colorWord: it.color,
+      hex: it.colorHex,
+      sampled: sampled ?? undefined,
+      category,
+    });
+    const { src, real } = pickImage(name, category, color, fit);
     return {
       id: `d-${seq.current++}`,
-      thumb,
+      thumb: src,
+      source,
+      real,
       name,
       category,
-      color: (it.color ?? "").trim(),
+      color,
       material: (it.material ?? "").trim(),
-      fit: normalizeFit(it.fit),
+      fit,
       checked: true,
       folded: it.folded === true,
       correctedFrom: from && from !== category ? from : undefined,
@@ -246,19 +275,21 @@ export function WardrobeScanModal({ open, onClose, onAdded }: Props) {
           } catch {
             items = [];
           }
-          // 액세서리(선글라스·모자 등)는 등록 대상이 아니다 — 모델이 걸러도 한 번 더 방어
-          const kept = items.filter((it) => normalizeCat(it.category, it.name) !== "액세서리");
+          // 가방·액세서리(선글라스·모자 등)는 등록 대상이 아니다 — 모델이 걸러도 한 번 더 방어
+          const kept = items.filter(
+            (it) => !SKIP_CATEGORIES.includes(normalizeCat(it.category, it.name))
+          );
           localAcc += items.length - kept.length;
           if (items.length === 0) {
             // 옷을 못 찾았거나 분석 실패 → 사진을 잃지 않도록 편집 초안 1점
-            collected.push(makeDraft(thumbUrl, { name: "새 옷", category: "상의" }));
+            collected.push(makeDraft({ name: "새 옷", category: "상의" }, thumbUrl));
           } else if (kept.length > 0) {
             detected += kept.length;
-            // 품목별로 사진에서 해당 영역만 잘라 각자의 썸네일을 만든다(실패 시 원본 축소본)
             for (const it of kept) {
-              // 한 장에서 최대 24벌이 나올 수 있으므로 썸네일을 조금 작게 — 저장 용량 보호
-              const cropped = await cropDataUrl(analyzeUrl, it.box, { outMax: 320, quality: 0.62 });
-              collected.push(makeDraft(cropped ?? thumbUrl, it));
+              // 크롭은 '그 옷의 색'을 재고 근거로 남기는 용도 — 목록 썸네일은 단품 사진/그림을 쓴다
+              const cropped = await cropDataUrl(analyzeUrl, it.box, { outMax: 240, quality: 0.6 });
+              const sampled = cropped ? await dominantHex(cropped) : null;
+              collected.push(makeDraft(it, cropped ?? undefined, sampled));
             }
           }
           // items 는 있었지만 전부 액세서리 → 초안을 만들지 않고 제외 집계만
@@ -298,8 +329,22 @@ export function WardrobeScanModal({ open, onClose, onAdded }: Props) {
   const checkedCount = drafts.filter((d) => d.checked).length;
   const allChecked = drafts.length > 0 && checkedCount === drafts.length;
 
+  // 이름·카테고리·핏을 고치면 그에 맞는 단품 이미지를 다시 고른다(색 단어가 바뀌면 색도 따라간다)
   const patch = (id: string, up: Partial<Draft>) =>
-    setDrafts((prev) => prev.map((d) => (d.id === id ? { ...d, ...up } : d)));
+    setDrafts((prev) =>
+      prev.map((d) => {
+        if (d.id !== id) return d;
+        const next = { ...d, ...up };
+        if (up.name === undefined && up.category === undefined && up.fit === undefined) return next;
+        const color = resolveColor({
+          name: next.name,
+          category: next.category,
+          sampled: d.color,
+        });
+        const { src, real } = pickImage(next.name, next.category, color, next.fit);
+        return { ...next, color, thumb: src, real };
+      })
+    );
 
   const addSelected = () => {
     const chosen = drafts.filter((d) => d.checked);
@@ -316,10 +361,11 @@ export function WardrobeScanModal({ open, onClose, onAdded }: Props) {
         label: "입을 수 있음",
         bg: meta.bg,
         type: meta.type,
-        color: meta.color,
+        color: d.color,
         wear: "0회",
         cpw: "—",
         img: d.thumb,
+        photo: d.source,
         daysAgo: 0,
         fit: d.fit || undefined,
       });
@@ -349,10 +395,11 @@ export function WardrobeScanModal({ open, onClose, onAdded }: Props) {
       >
         <h2 id="wsTitle">사진으로 옷장 채우기</h2>
         <p>
-          옷장을 한 장에 담아 찍어도 옷을 한 벌씩 분리해 품목별로 잘라낸 썸네일과 함께 목록으로
-          만들어요(한 장 최대 24벌). 접혀 걸린 바지는 이름·형태 단서로 하의로 교정하고, 누운 사진은
-          자동으로 바로 세워 분석해요. 썸네일은 이 기기에만 저장되고 원본 사진은 분석에만 쓰여요.
-          액세서리(선글라스 등)는 등록하지 않아요.
+          옷장을 한 장에 담아 찍어도 옷을 한 벌씩 분리해요(한 장 최대 24벌). 옷 한 점은 그 옷만
+          담긴 이미지 한 장으로 보여드려요 — 종류·색이 맞는 <b>실제 단품 사진</b>을 먼저 찾고, 없을
+          때만 비슷한 그림을 만들어요. 접혀 걸린 바지는 하의로 교정하고, 누운 사진은 바로 세워
+          분석해요. 원본 사진은 분석과 근거 표시에만 쓰이고 이 기기에만 남아요. 가방·액세서리는
+          등록하지 않아요.
         </p>
 
         <input
@@ -476,14 +523,18 @@ export function WardrobeScanModal({ open, onClose, onAdded }: Props) {
                     </label>
                     <div className="ws-thumb">
                       <img src={d.thumb} alt={d.name} />
-                      {(d.folded || d.correctedFrom) && (
-                        <div className="ws-flags">
-                          {d.folded && <span className="ws-flag">접힘</span>}
-                          {d.correctedFrom && (
-                            <span className="ws-flag fix">{d.correctedFrom}→{d.category}</span>
-                          )}
-                        </div>
+                      {d.source && (
+                        <img className="ws-source" src={d.source} alt="사진에서 인식한 부분" title="사진에서 인식한 부분" />
                       )}
+                      <div className="ws-flags">
+                        <span className={"ws-flag" + (d.real ? " real" : "")}>
+                          {d.real ? "실제 사진" : "비슷한 그림"}
+                        </span>
+                        {d.folded && <span className="ws-flag">접힘</span>}
+                        {d.correctedFrom && (
+                          <span className="ws-flag fix">{d.correctedFrom}→{d.category}</span>
+                        )}
+                      </div>
                     </div>
                     <div className="ws-fields">
                       <input

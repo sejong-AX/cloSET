@@ -145,8 +145,18 @@ button,input,select{font:inherit}button{color:inherit}svg{display:block}.hidden{
 .ws-card.on{border-color:var(--forest);background:#f6faf8}
 .ws-check{position:absolute;top:7px;right:7px;z-index:1}
 .ws-check input{width:17px;height:17px;accent-color:var(--forest);cursor:pointer}
-.ws-thumb{width:52px;height:52px;border-radius:9px;overflow:hidden;flex-shrink:0;background:#eef0ec}
-.ws-thumb img{width:100%;height:100%;object-fit:cover}
+/* 옷장 카드 이미지 — 옷 한 점만 담긴 단품 컷이므로 잘라내지 말고 카드 안에 전체가 들어오게 */
+.cloth-photo{overflow:hidden}
+.cloth-photo img.cloth-img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;display:block;padding:10px}
+/* 검수 카드 썸네일 — 옷 한 점만 담긴 이미지(실제 단품 사진 또는 만든 그림) */
+.ws-thumb{position:relative;width:72px;height:72px;border-radius:10px;overflow:hidden;flex-shrink:0;background:#f4f2ee;border:1px solid #e6ece9}
+.ws-thumb>img{width:100%;height:100%;object-fit:contain;background:#f7f6f3}
+/* 사진에서 인식한 부분 — 근거로만 작게 겹쳐 둔다 */
+.ws-source{position:absolute;left:3px;bottom:3px;width:22px;height:22px;border-radius:5px;object-fit:cover;border:1.5px solid #fff;box-shadow:0 1px 3px rgba(20,40,32,.28)}
+.ws-flags{position:absolute;top:3px;left:3px;display:flex;flex-direction:column;gap:2px;align-items:flex-start}
+.ws-flag{padding:1px 5px;border-radius:999px;background:rgba(38,52,46,.82);color:#fff;font-size:8px;font-weight:800;letter-spacing:.02em}
+.ws-flag.real{background:var(--forest)}
+.ws-flag.fix{background:#8a6a2f}
 .ws-fields{display:flex;flex-direction:column;gap:5px;min-width:0;flex:1;padding-right:20px}
 .ws-row{display:flex;gap:5px}
 .ws-name{width:100%;border:1px solid #dbe4df;border-radius:8px;padding:6px 8px;font-size:12px;font-weight:700;color:var(--ink);background:#fff}
@@ -268,7 +278,9 @@ button,input,select{font:inherit}button{color:inherit}svg{display:block}.hidden{
 .detail-modal{max-width:660px;max-height:min(88vh,860px);overflow:auto;padding:0}
 .detail-head{display:flex;gap:16px;padding:20px 22px 0}
 .detail-photo{width:132px;height:158px;border-radius:15px;overflow:hidden;position:relative;flex:none}
-.detail-photo img{width:100%;height:100%;object-fit:cover;display:block}
+.detail-photo img{width:100%;height:100%;object-fit:contain;display:block;padding:8px}
+/* 등록 근거로 남긴 원본 사진 — 구석에 작게 */
+.detail-photo .detail-source{position:absolute;right:6px;bottom:6px;width:44px;height:44px;padding:0;object-fit:cover;border-radius:8px;border:2px solid #fff;box-shadow:0 2px 6px rgba(20,40,32,.3)}
 .detail-title{min-width:0;flex:1}
 .detail-title h2{font-size:21px;letter-spacing:-.6px;margin:4px 0 5px;overflow-wrap:anywhere}
 .detail-title>p{font-size:10px;color:var(--sub);margin:0 0 12px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
@@ -314,3 +326,13 @@ button,input,select{font:inherit}button{color:inherit}svg{display:block}.hidden{
  .detail-outfit-mq{width:100%;height:220px}
  .past-thumbs span{width:28px;height:28px}
 }
+
+/* ---- 단품 컷 표시 규칙 (마지막에 두어 앞선 cover 규칙을 확실히 덮는다) ----
+   옷 한 점만 담긴 이미지이므로 잘라내면 옷의 형태가 사라진다. 항상 전체가 보이게 한다. */
+.cloth-photo img.cloth-img,
+.stage-chip img,
+.swatch-item img,
+.mini-outfit .swatch-item img,
+.rack-item img,
+.detail-photo img{object-fit:contain}
+.stage-chip img,.swatch-item img,.rack-item img{background:#f5f3ef}

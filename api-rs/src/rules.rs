@@ -493,6 +493,11 @@ fn category_from_keywords(text: &str) -> Option<&'static str> {
     if hit_kw(text, KW_BOTTOM) {
         return Some("하의");
     }
+    // '슬림진·스키니진·블랙진'처럼 '진'으로 끝나면 청바지다(단독 '진'은 제외).
+    // web/lib/garment.ts 의 resolveCategory 와 같은 규칙을 유지한다.
+    if text.chars().count() >= 3 && text.ends_with('진') {
+        return Some("하의");
+    }
     if hit_kw(text, KW_DRESS) {
         return Some("원피스");
     }

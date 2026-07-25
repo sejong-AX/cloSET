@@ -7,6 +7,8 @@ import { WardrobeScanModal } from "../WardrobeScanModal";
 import { ItemDetailModal } from "../ItemDetailModal";
 import { objectParticle, type ClothState, type Item } from "@/lib/data";
 import { resolveCategory } from "@/lib/garment";
+import { garmentArtDataUrl, resolveColor } from "@/lib/garment-art";
+import { matchGarmentPhoto } from "@/lib/garment-catalog";
 
 const FILTER_DEFS: { key: string; name: string }[] = [
   { key: "all", name: "전체" },
@@ -17,12 +19,12 @@ const FILTER_DEFS: { key: string; name: string }[] = [
   { key: "favorite", name: "즐겨찾기" },
 ];
 
-// 새 옷 등록 시 카테고리별 기본 사진·표기
-const CATEGORY_META: Record<string, { type: string; img: string; bg: string; color: string }> = {
-  상의: { type: "top-g", img: "/items/shirt-white.jpg", bg: "#eef0ec", color: "#e7e5dc" },
-  하의: { type: "pants", img: "/items/pants.jpg", bg: "#e2e7ec", color: "#6b83a0" },
-  아우터: { type: "coat", img: "/items/cardigan-ivory.jpg", bg: "#efe9de", color: "#e3d8c2" },
-  신발: { type: "shoe", img: "/items/shoe.jpg", bg: "#eee5da", color: "#765c48" },
+// 새 옷 등록 시 카테고리별 표기(이미지는 이름·색으로 그때그때 고른다)
+const CATEGORY_META: Record<string, { type: string; bg: string }> = {
+  상의: { type: "top-g", bg: "#eef0ec" },
+  하의: { type: "pants", bg: "#e2e7ec" },
+  아우터: { type: "coat", bg: "#efe9de" },
+  신발: { type: "shoe", bg: "#eee5da" },
 };
 
 const parsePrice = (s: string) => {
@@ -182,6 +184,9 @@ export function ClosetView() {
     const resolved = resolveCategory(name, category);
     const effective = CATEGORY_META[resolved] ? resolved : category;
     const meta = CATEGORY_META[effective] ?? CATEGORY_META["상의"];
+    // 이름의 색 단어로 색을 정하고, 그 종류·색에 맞는 실제 단품 사진을 먼저 찾는다
+    const color = resolveColor({ name, category: resolved });
+    const photo = matchGarmentPhoto({ name, category: resolved, color });
     addClothing({
       name,
       cat: `${effective} · ${location}`,
@@ -189,10 +194,11 @@ export function ClosetView() {
       label: "입을 수 있음",
       bg: meta.bg,
       type: meta.type,
-      color: meta.color,
+      color,
       wear: "0회",
       cpw: "—", // 착용 전에는 회당 비용 미정(구매가를 회당 비용으로 오표기하지 않음)
-      img: newPhoto ?? meta.img,
+      img: photo ?? garmentArtDataUrl({ name, category: resolved, color }),
+      photo: newPhoto ?? undefined,
       daysAgo: 0,
     });
     pendingUrlRef.current = null; // 사진을 아이템이 소유

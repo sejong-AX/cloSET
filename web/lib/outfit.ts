@@ -199,6 +199,10 @@ interface Scored {
   total: number;
 }
 
+interface RankedCombo extends Scored {
+  sig: string;
+}
+
 function scoreCombo(slots: OutfitSlots, tpo: TpoDef, w: WeatherLike, gender: Gender): Scored {
   const scores = {
     weather: weatherScore(slots, w),
@@ -311,15 +315,56 @@ export interface BuildOptions {
   anchor?: Item;
 }
 
+/** 조합 후보를 모두 점수화한다(정렬 없음 — 호출부가 용도에 맞게 고른다) */
+function rankCombos(
+  combos: OutfitSlots[],
+  tpo: TpoDef,
+  weather: WeatherLike,
+  gender: Gender
+): RankedCombo[] {
+  return combos.map((slots) => ({
+    ...scoreCombo(slots, tpo, weather, gender),
+    sig: outfitSignature(slotItems(slots)),
+  }));
+}
+
+function toOutfit(c: RankedCombo, tpo: TpoDef, gender: Gender, weather: WeatherLike): Outfit {
+  const list = slotItems(c.slots);
+  return {
+    sig: c.sig,
+    slots: c.slots,
+    items: list,
+    tpo,
+    gender,
+    scores: c.scores,
+    total: c.total,
+    title: buildTitle(c.slots, tpo, weather),
+    desc: buildDesc(c.slots, weather),
+    pill: buildPill(c.slots),
+    rank: "",
+    laundryCount: list.filter((x) => x.state === "laundry").length,
+  };
+}
+
+/** 조합에 쓰인 옷 id — 다양성 페널티 계산용 */
+function comboIds(s: OutfitSlots): string[] {
+  return slotItems(s).map((x) => x.id);
+}
+
+/** 착장에 넣을 수 있는 옷만(가방·액세서리 제외) */
+function wearableOf(items: Item[]): Item[] {
+  return items.filter((x) => {
+    const s = slotOfItem(x);
+    return s !== "bag" && s !== "acc";
+  });
+}
+
 /**
  * TPO 4종에 대해 각각 최적 조합을 만든다(총점 높은 순). 옷장이 비었으면 빈 배열.
  * 같은 조합·같은 상의가 여러 카드에 반복되지 않도록 결정적으로 눌러 카드마다 다르게 보인다.
  */
 export function buildOutfits({ items, weather, gender, anchor }: BuildOptions): Outfit[] {
-  const wearable = items.filter((x) => {
-    const s = slotOfItem(x);
-    return s !== "bag" && s !== "acc";
-  });
+  const wearable = wearableOf(items);
   if (wearable.length === 0) return [];
   if (anchor) {
     const s = slotOfItem(anchor);
@@ -334,48 +379,92 @@ export function buildOutfits({ items, weather, gender, anchor }: BuildOptions): 
   const outfits: Outfit[] = [];
 
   for (const tpo of TPOS) {
-    let best: Scored | null = null;
-    let bestSig = "";
-    for (const slots of combos) {
-      const sig = outfitSignature(slotItems(slots));
-      const scored = scoreCombo(slots, tpo, weather, gender);
-      let total = scored.total;
-      if (usedSigs.has(sig)) total -= 40; // 이미 다른 카드가 쓴 조합
-      const topId = (slots.top ?? slots.dress)?.id;
+    let best: RankedCombo | null = null;
+    for (const c of rankCombos(combos, tpo, weather, gender)) {
+      let total = c.total;
+      if (usedSigs.has(c.sig)) total -= 40; // 이미 다른 카드가 쓴 조합
+      const topId = (c.slots.top ?? c.slots.dress)?.id;
       if (topId && usedTops.has(topId)) total -= 6; // 같은 상의 반복은 살짝만 감점
       if (
         !best ||
         total > best.total ||
-        (total === best.total && sig.localeCompare(bestSig) < 0) // 동점은 서명 순 — 결정적
+        (total === best.total && c.sig.localeCompare(best.sig) < 0) // 동점은 서명 순 — 결정적
       ) {
-        best = { ...scored, total };
-        bestSig = sig;
+        best = { ...c, total };
       }
     }
     if (!best) continue;
-    usedSigs.add(bestSig);
+    usedSigs.add(best.sig);
     const topId = (best.slots.top ?? best.slots.dress)?.id;
     if (topId) usedTops.add(topId);
-    const list = slotItems(best.slots);
-    outfits.push({
-      sig: bestSig,
-      slots: best.slots,
-      items: list,
-      tpo,
-      gender,
-      scores: best.scores,
-      total: best.total,
-      title: buildTitle(best.slots, tpo, weather),
-      desc: buildDesc(best.slots, weather),
-      pill: buildPill(best.slots),
-      rank: "",
-      laundryCount: list.filter((x) => x.state === "laundry").length,
-    });
+    outfits.push(toOutfit(best, tpo, gender, weather));
   }
 
   // 총점 높은 순으로 카드 순서를 정하고 BEST MATCH 번호를 붙인다
   outfits.sort((a, b) => (b.total !== a.total ? b.total - a.total : a.sig.localeCompare(b.sig)));
   return outfits.map((o, i) => ({ ...o, rank: `BEST MATCH 0${i + 1}` }));
+}
+
+export interface VariantOptions {
+  items: Item[];
+  weather: WeatherLike;
+  gender: Gender;
+  tpo: TpoDef;
+  /** 최대 몇 벌까지 만들지 */
+  limit?: number;
+}
+
+/**
+ * 한 TPO 안에서 **서로 다른 조합**을 여러 벌 만든다 — '다른 조합' 버튼의 근거.
+ *
+ * 저장된 착장을 다시 보여주는 게 아니라, 지금 내 옷장 아이템만으로 매번 새 조합을 짠다.
+ * 이미 뽑힌 조합과 상의·하의·아우터가 겹칠수록 감점해서, 다음 조합은 눈에 띄게 달라진다.
+ * 완전히 결정적이므로 같은 옷장·같은 날씨면 순서까지 항상 같다.
+ */
+export function buildOutfitVariants({
+  items,
+  weather,
+  gender,
+  tpo,
+  limit = 8,
+}: VariantOptions): Outfit[] {
+  const wearable = wearableOf(items);
+  if (wearable.length === 0) return [];
+  const combos = enumerate(bySlot(wearable), gender);
+  if (combos.length === 0) return [];
+  const ranked = rankCombos(combos, tpo, weather, gender);
+
+  const picked: RankedCombo[] = [];
+  const usedSigs = new Set<string>();
+  const usage = new Map<string, number>(); // 아이템 id → 이미 쓰인 횟수
+
+  while (picked.length < limit) {
+    let best: RankedCombo | null = null;
+    let bestAdj = -Infinity;
+    for (const c of ranked) {
+      if (usedSigs.has(c.sig)) continue;
+      // 이미 쓴 옷이 많이 겹칠수록 크게 감점 → 다음 조합은 실제로 달라진다
+      const overlap = comboIds(c.slots).reduce((s, id) => s + (usage.get(id) ?? 0), 0);
+      const adj = c.total - overlap * 9;
+      if (
+        !best ||
+        adj > bestAdj ||
+        (adj === bestAdj && c.sig.localeCompare(best.sig) < 0) // 동점은 서명 순 — 결정적
+      ) {
+        best = c;
+        bestAdj = adj;
+      }
+    }
+    if (!best) break;
+    usedSigs.add(best.sig);
+    for (const id of comboIds(best.slots)) usage.set(id, (usage.get(id) ?? 0) + 1);
+    picked.push(best);
+  }
+
+  return picked.map((c, i) => ({
+    ...toOutfit(c, tpo, gender, weather),
+    rank: i === 0 ? "BEST MATCH 01" : `다른 조합 ${String(i + 1).padStart(2, "0")}`,
+  }));
 }
 
 /** 날씨에 가장 잘 맞는 조합의 인덱스 — 사용자가 손대기 전 기본 선택 */

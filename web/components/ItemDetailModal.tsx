@@ -142,6 +142,15 @@ export function ItemDetailModal({ item, onClose, onUseOutfit }: Props) {
           <div className="detail-photo" style={{ background: live.bg }}>
             <img src={live.img} alt={live.name} />
             <span className="state-badge">{live.label}</span>
+            {/* 등록에 쓴 원본 사진 — 이 옷을 어디서 인식했는지 근거로 보여준다 */}
+            {live.photo && (
+              <img
+                className="detail-source"
+                src={live.photo}
+                alt="등록에 쓴 원본 사진"
+                title="등록에 쓴 원본 사진"
+              />
+            )}
           </div>
           <div className="detail-title">
             <div className="eyebrow">

@@ -65,6 +65,8 @@ const norm = (s: string) => s.toLowerCase().replace(/\s+/g, "");
 export function resolveCategory(name: string, rawCategory?: string): Category {
   const n = norm(name);
   if (hit(n, KW_BOTTOM)) return "하의";
+  // '슬림진·스키니진·블랙진'처럼 '진'으로 끝나면 청바지다(단독 '진'은 제외)
+  if (n.length >= 3 && n.endsWith("진")) return "하의";
   if (hit(n, KW_DRESS)) return "원피스";
   if (hit(n, KW_SHOE)) return "신발";
   if (hit(n, KW_BAG)) return "가방";

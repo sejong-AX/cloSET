@@ -9,6 +9,7 @@ import { PastOutfitsModal } from "../PastOutfitsModal";
 import { careNote, type Item } from "@/lib/data";
 import type { Gender } from "@/lib/garment";
 import {
+  buildOutfitVariants,
   buildOutfits,
   dayKey,
   defaultOutfitIndex,
@@ -50,7 +51,8 @@ let weatherCache: { data: Weather; at: number } | null = null;
 export function HomeView() {
   const { toast, switchView, items, wearItems, gender, setGender, outfitLog, logOutfit } = useApp();
   const [saved, setSaved] = useState<Set<string>>(new Set());
-  const [outfitIdx, setOutfitIdx] = useState(0);
+  const [outfitIdx, setOutfitIdx] = useState(0); // 어떤 TPO 카드인지
+  const [variantIdx, setVariantIdx] = useState(0); // 그 TPO 안에서 몇 번째 조합인지
   const [tpoOpen, setTpoOpen] = useState(false);
   const [styleOpen, setStyleOpen] = useState(false);
   const [pastOpen, setPastOpen] = useState(false);
@@ -62,23 +64,34 @@ export function HomeView() {
     () => buildOutfits({ items, weather, gender }),
     [items, weather, gender]
   );
-  // 반대 성별 추천 — 같은 옷장에서도 조합이 갈리는지 비교해 '공용/전용'을 표시한다
+  const tpoIdx = Math.min(outfitIdx, Math.max(0, outfits.length - 1));
+  const activeTpo = outfits[tpoIdx]?.tpo;
+
+  // '다른 조합' — 지금 TPO 안에서 내 옷장 옷만으로 매번 다른 조합을 만들어 둔다(저장된 착장 재사용 아님)
+  const variants = useMemo(
+    () => (activeTpo ? buildOutfitVariants({ items, weather, gender, tpo: activeTpo, limit: 8 }) : []),
+    [items, weather, gender, activeTpo]
+  );
+  // 반대 성별의 같은 순번 조합 — 같으면 '공용', 다르면 '전용 추천' 배지를 붙인다
   const otherGender: Gender = gender === "female" ? "male" : "female";
-  const otherOutfits = useMemo(
-    () => buildOutfits({ items, weather, gender: otherGender }),
-    [items, weather, otherGender]
+  const otherVariants = useMemo(
+    () =>
+      activeTpo
+        ? buildOutfitVariants({ items, weather, gender: otherGender, tpo: activeTpo, limit: 8 })
+        : [],
+    [items, weather, otherGender, activeTpo]
   );
 
-  const outfit: Outfit | undefined = outfits[Math.min(outfitIdx, Math.max(0, outfits.length - 1))];
+  const vIdx = Math.min(variantIdx, Math.max(0, variants.length - 1));
+  const outfit: Outfit | undefined = variants[vIdx] ?? outfits[tpoIdx];
   const wornSigs = useMemo(() => wornTodaySigs(outfitLog), [outfitLog]);
   const worn = outfit ? wornSigs.has(outfit.sig) : false;
 
-  // 같은 TPO 에서 두 성별 추천이 같은지 — 다르면 '남성 전용/여성 전용' 배지를 붙인다
   const shared = useMemo(() => {
     if (!outfit) return true;
-    const counterpart = otherOutfits.find((o) => o.tpo.key === outfit.tpo.key);
+    const counterpart = otherVariants[vIdx];
     return !counterpart || counterpart.sig === outfit.sig;
-  }, [outfit, otherOutfits]);
+  }, [outfit, otherVariants, vIdx]);
 
   // 세종시 실시간 날씨 로드 (실패 시 FALLBACK 유지, 10분 캐시)
   useEffect(() => {
@@ -121,27 +134,32 @@ export function HomeView() {
   useEffect(() => {
     if (touched.current || outfits.length === 0) return;
     setOutfitIdx(defaultOutfitIndex(outfits));
+    setVariantIdx(0);
   }, [outfits]);
 
+  // 내 옷장 안에서 실제로 다른 조합을 짜서 넘긴다(다음 순번의 조합 — 저장된 착장이 아니다)
   const nextOutfit = () => {
-    if (outfits.length < 2) {
-      toast("다른 조합을 만들 옷이 아직 부족해요");
+    if (variants.length < 2) {
+      toast("다른 조합을 만들려면 상의·하의가 더 필요해요");
       return;
     }
     touched.current = true;
-    setOutfitIdx((i) => (i + 1) % outfits.length);
-    toast("다른 조합을 찾았어요");
+    const next = (vIdx + 1) % variants.length;
+    setVariantIdx(next);
+    toast(`내 옷장으로 만든 ${next + 1}번째 조합이에요 · ${variants[next].title}`);
   };
 
   const selectTpo = (i: number) => {
     touched.current = true;
     setOutfitIdx(i);
-    toast(`${outfits[i].tpo.label} 상황에 맞춰 추천했어요`);
+    setVariantIdx(0);
+    toast(`${outfits[i].tpo.label} 상황에 맞춰 다시 조합했어요`);
   };
 
   const pickGender = (g: Gender) => {
     if (g === gender) return;
     setGender(g);
+    setVariantIdx(0);
     touched.current = false;
     toast(`${g === "female" ? "여성" : "남성"} ${STATURE[g]}cm 기준으로 다시 코디했어요`);
   };
@@ -174,10 +192,10 @@ export function HomeView() {
   );
   const wearPastAgain = () => {
     if (!past) return;
-    const idx = outfits.findIndex((o) => o.sig === past.sig);
+    const idx = variants.findIndex((o) => o.sig === past.sig);
     if (idx >= 0) {
       touched.current = true;
-      setOutfitIdx(idx);
+      setVariantIdx(idx);
       toast("지난 착장을 오늘의 착장으로 올렸어요");
       return;
     }
@@ -243,8 +261,9 @@ export function HomeView() {
           <p>세종시 날씨와 오늘 일정에 맞춰 내 옷장에서 조합했어요.</p>
         </div>
         <div className="head-actions">
-          <button className="btn soft" onClick={nextOutfit}>
+          <button className="btn soft" onClick={nextOutfit} title="내 옷장 옷으로 다른 조합을 짜요">
             다른 조합
+            {variants.length > 1 && ` ${vIdx + 1}/${variants.length}`}
           </button>
           <button className="btn soft" onClick={() => setStyleOpen(true)}>
             <Icon id="i-scan" />
@@ -294,7 +313,7 @@ export function HomeView() {
               {outfits.map((o, i) => (
                 <button
                   key={o.tpo.key}
-                  className={"tpo-chip" + (outfitIdx === i ? " active" : "")}
+                  className={"tpo-chip" + (tpoIdx === i ? " active" : "")}
                   onClick={() => selectTpo(i)}
                 >
                   <span>{o.tpo.icon}</span> {o.tpo.label}
@@ -532,10 +551,10 @@ export function HomeView() {
         open={pastOpen}
         onClose={() => setPastOpen(false)}
         onWear={(entry) => {
-          const idx = outfits.findIndex((o) => o.sig === entry.sig);
+          const idx = variants.findIndex((o) => o.sig === entry.sig);
           if (idx >= 0) {
             touched.current = true;
-            setOutfitIdx(idx);
+            setVariantIdx(idx);
             toast("저장 코디를 오늘의 착장으로 올렸어요");
           } else {
             wearItems(entry.ids);

@@ -10,6 +10,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  TPOS,
+  buildOutfitVariants,
   buildOutfits,
   colorScore,
   dayKey,
@@ -306,4 +308,56 @@ test("원피스를 앵커로 주면 상의·하의 조합이 아니라 원피스
     assert.equal(o.slots.dress?.id, dress.id);
     assert.equal(o.slots.top, undefined);
   }
+});
+
+// ---- 6) '다른 조합' — 내 옷장 옷으로 매번 실제 다른 조합을 짠다 ----
+
+test("다른 조합은 서로 다른 착장이고, 전부 내 옷장 옷으로만 만들어진다", () => {
+  const items = closet();
+  const ids = new Set(items.map((x) => x.id));
+  const variants = buildOutfitVariants({ items, weather, gender: "female", tpo: TPOS[1], limit: 6 });
+  assert.ok(variants.length >= 3, `조합이 ${variants.length}개뿐`);
+  // 서명이 전부 달라야 '다른 조합'이다
+  assert.equal(new Set(variants.map((o) => o.sig)).size, variants.length);
+  for (const o of variants) {
+    assert.ok(o.items.length > 0);
+    for (const x of o.items) assert.ok(ids.has(x.id), `옷장에 없는 옷: ${x.name}`);
+  }
+});
+
+test("연속한 두 조합은 최소 한 벌 이상 다르다", () => {
+  const variants = buildOutfitVariants({ items: closet(), weather, gender: "female", tpo: TPOS[0], limit: 6 });
+  for (let i = 1; i < variants.length; i += 1) {
+    const prev = new Set(variants[i - 1].items.map((x) => x.id));
+    const changed = variants[i].items.filter((x) => !prev.has(x.id));
+    assert.ok(changed.length > 0, `${i}번째 조합이 이전과 완전히 같다`);
+  }
+});
+
+test("다른 조합도 결정적이다 — 같은 옷장·날씨면 순서까지 같다", () => {
+  const a = buildOutfitVariants({ items: closet(), weather, gender: "male", tpo: TPOS[2], limit: 5 });
+  const b = buildOutfitVariants({ items: closet(), weather, gender: "male", tpo: TPOS[2], limit: 5 });
+  assert.deepEqual(a.map((o) => o.sig), b.map((o) => o.sig));
+});
+
+test("옷장이 비면 다른 조합도 비고, 저장된 착장이 되살아나지 않는다", () => {
+  assert.deepEqual(buildOutfitVariants({ items: [], weather, gender: "female", tpo: TPOS[0] }), []);
+});
+
+test("가방·액세서리는 조합에 들어가지 않는다", () => {
+  const bag = mk("블랙 백팩", "가방 · 옷장 1");
+  const variants = buildOutfitVariants({
+    items: [...closet(), bag],
+    weather,
+    gender: "female",
+    tpo: TPOS[1],
+    limit: 6,
+  });
+  for (const o of variants) assert.ok(!o.items.some((x) => x.id === bag.id));
+});
+
+test("첫 조합은 BEST MATCH, 이후는 '다른 조합' 번호가 붙는다", () => {
+  const variants = buildOutfitVariants({ items: closet(), weather, gender: "female", tpo: TPOS[1], limit: 4 });
+  assert.equal(variants[0].rank, "BEST MATCH 01");
+  assert.match(variants[1].rank, /^다른 조합 02$/);
 });

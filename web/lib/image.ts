@@ -67,6 +67,45 @@ export async function fileToDataUrl(file: File, max = 768, quality = 0.82): Prom
 }
 
 /**
+ * 사진(data URL)의 대표색 — 가운데 60% 영역 픽셀의 중앙값.
+ * 옷 이름·비전이 색을 못 줬을 때만 쓰는 폴백이라 정확도보다 견고함이 중요하다.
+ * 실패하면 null.
+ */
+export async function dominantHex(src: string): Promise<string | null> {
+  try {
+    const img = await loadImage(src);
+    const n = 32;
+    const c = document.createElement("canvas");
+    c.width = n;
+    c.height = n;
+    const cx = c.getContext("2d", { willReadFrequently: true });
+    if (!cx) return null;
+    cx.drawImage(img, 0, 0, n, n);
+    const lo = Math.floor(n * 0.2);
+    const hi = Math.ceil(n * 0.8);
+    const { data } = cx.getImageData(lo, lo, hi - lo, hi - lo);
+    const rs: number[] = [];
+    const gs: number[] = [];
+    const bs: number[] = [];
+    for (let i = 0; i < data.length; i += 4) {
+      if (data[i + 3] < 128) continue;
+      rs.push(data[i]);
+      gs.push(data[i + 1]);
+      bs.push(data[i + 2]);
+    }
+    if (rs.length === 0) return null;
+    const mid = (arr: number[]) => {
+      arr.sort((a, b) => a - b);
+      return arr[Math.floor(arr.length / 2)];
+    };
+    const hex = (v: number) => Math.max(0, Math.min(255, v)).toString(16).padStart(2, "0");
+    return `#${hex(mid(rs))}${hex(mid(gs))}${hex(mid(bs))}`;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * data URL 사진에서 box(백분율) 영역을 잘라 품목별 썸네일을 만든다.
  * 여백(pad)을 두르고 사진 경계로 클램프한다. box 가 없거나 지나치게 작으면 null(호출부 폴백).
  */

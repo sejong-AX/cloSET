@@ -261,3 +261,16 @@ fn iou_keeps_neighbouring_garments_apart() {
     assert_eq!(box_iou((0.0, 0.0, 10.0, 10.0), (50.0, 50.0, 10.0, 10.0)), 0.0);
     assert_eq!(box_iou((0.0, 0.0, 0.0, 0.0), (0.0, 0.0, 10.0, 10.0)), 0.0);
 }
+
+/// '진'으로 끝나는 이름은 청바지다 — web/lib/garment.ts 의 resolveCategory 와 같은 규칙.
+/// (모델이 '인디고 슬림 진'을 상의로 돌려줘도 하의로 교정되어야 한다)
+#[test]
+fn names_ending_with_jin_are_bottoms() {
+    for name in ["인디고 슬림 진", "블랙진", "와이드진", "스키니진"] {
+        assert_eq!(resolve_garment_category(name, "상의"), "하의", "name={name}");
+    }
+    // 한 글자 '진'은 옷 이름으로 보지 않는다
+    assert_eq!(resolve_garment_category("진", "상의"), "상의");
+    // '가디건'처럼 다른 글자로 끝나는 이름은 영향받지 않는다
+    assert_eq!(resolve_garment_category("아이보리 케이블 가디건", "상의"), "니트");
+}
