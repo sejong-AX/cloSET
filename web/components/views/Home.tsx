@@ -9,8 +9,7 @@ import { PastOutfitsModal } from "../PastOutfitsModal";
 import { careNote, type Item } from "@/lib/data";
 import type { Gender } from "@/lib/garment";
 import {
-  buildOutfitVariants,
-  buildOutfits,
+  buildOutfitBoard,
   dayKey,
   defaultOutfitIndex,
   pickPastOutfit,
@@ -59,28 +58,23 @@ export function HomeView() {
   const [weather, setWeather] = useState<Weather>(FALLBACK_WEATHER);
   const touched = useRef(false); // 사용자가 조합을 직접 고르면 날씨 자동 선택을 멈춘다
 
-  // 추천은 실제 옷장에서 만든다 — 옷장을 비우면 추천도 비고, 새로 채우면 새 옷으로 다시 만들어진다
-  const outfits = useMemo(
-    () => buildOutfits({ items, weather, gender }),
+  // 추천은 실제 옷장에서 만든다 — 옷장을 비우면 추천도 비고, 새로 채우면 새 옷으로 다시 만들어진다.
+  // TPO 4종을 한 번에 만들어 서로 다른 조합이 되게 한다(출근 룩과 저녁 룩이 같아 보이던 문제).
+  const board = useMemo(
+    () => buildOutfitBoard({ items, weather, gender, perTpo: 8 }).filter((s) => s.length > 0),
     [items, weather, gender]
   );
+  const outfits = useMemo(() => board.map((s) => s[0]), [board]);
   const tpoIdx = Math.min(outfitIdx, Math.max(0, outfits.length - 1));
-  const activeTpo = outfits[tpoIdx]?.tpo;
+  const variants = board[tpoIdx] ?? [];
 
-  // '다른 조합' — 지금 TPO 안에서 내 옷장 옷만으로 매번 다른 조합을 만들어 둔다(저장된 착장 재사용 아님)
-  const variants = useMemo(
-    () => (activeTpo ? buildOutfitVariants({ items, weather, gender, tpo: activeTpo, limit: 8 }) : []),
-    [items, weather, gender, activeTpo]
-  );
-  // 반대 성별의 같은 순번 조합 — 같으면 '공용', 다르면 '전용 추천' 배지를 붙인다
+  // 반대 성별의 같은 TPO·같은 순번 조합 — 같으면 '공용', 다르면 '전용 추천' 배지를 붙인다
   const otherGender: Gender = gender === "female" ? "male" : "female";
-  const otherVariants = useMemo(
-    () =>
-      activeTpo
-        ? buildOutfitVariants({ items, weather, gender: otherGender, tpo: activeTpo, limit: 8 })
-        : [],
-    [items, weather, otherGender, activeTpo]
+  const otherBoard = useMemo(
+    () => buildOutfitBoard({ items, weather, gender: otherGender, perTpo: 8 }).filter((s) => s.length > 0),
+    [items, weather, otherGender]
   );
+  const otherVariants = otherBoard[tpoIdx] ?? [];
 
   const vIdx = Math.min(variantIdx, Math.max(0, variants.length - 1));
   const outfit: Outfit | undefined = variants[vIdx] ?? outfits[tpoIdx];

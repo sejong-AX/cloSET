@@ -91,9 +91,9 @@ export function anthro(gender: Gender): Anthro {
     // 팔은 어깨 끝에서 시작해 아래로 갈수록 몸통에서 조금씩 벌어진다.
     // (몸통에 딱 붙이면 앞모습에서 팔·몸통이 한 덩어리로 보인다 — 실제 디스플레이 마네킹도 살짝 벌어져 있다)
     armC: {
-      sh: w.shoulder - w.armUpper * 0.55,
-      el: w.shoulder + w.armElbow * 0.30,
-      wr: w.shoulder + w.armWrist * 0.55,
+      sh: w.shoulder - w.armUpper * 0.5,
+      el: w.shoulder + w.armElbow * 0.85,
+      wr: w.shoulder + w.armWrist * 1.5,
     },
   };
 }

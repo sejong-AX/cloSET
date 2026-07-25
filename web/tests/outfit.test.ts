@@ -11,6 +11,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   TPOS,
+  buildOutfitBoard,
   buildOutfitVariants,
   buildOutfits,
   colorScore,
@@ -360,4 +361,32 @@ test("첫 조합은 BEST MATCH, 이후는 '다른 조합' 번호가 붙는다", 
   const variants = buildOutfitVariants({ items: closet(), weather, gender: "female", tpo: TPOS[1], limit: 4 });
   assert.equal(variants[0].rank, "BEST MATCH 01");
   assert.match(variants[1].rank, /^다른 조합 02$/);
+});
+
+test("TPO 4종은 서로 다른 조합이 대표로 나온다 (출근 룩 = 저녁 룩 방지)", () => {
+  const board = buildOutfitBoard({ items: closet(), weather, gender: "female", perTpo: 4 });
+  const reps = board.map((s) => s[0]).filter(Boolean);
+  assert.equal(reps.length, 4);
+  const sigs = reps.map((o) => o.sig);
+  assert.equal(new Set(sigs).size, sigs.length, `TPO 대표 조합이 겹친다: ${sigs.join(" / ")}`);
+  // 이름이 아니라 실제 구성이 달라야 한다 — 인접 TPO끼리 최소 한 벌은 다르다
+  for (let i = 1; i < reps.length; i += 1) {
+    const prev = new Set(reps[i - 1].items.map((x) => x.id));
+    assert.ok(reps[i].items.some((x) => !prev.has(x.id)), `${reps[i].tpo.label} 이 이전 TPO와 같다`);
+  }
+});
+
+test("보드도 결정적이고, 각 TPO 안에서는 다른 조합이 계속 나온다", () => {
+  const a = buildOutfitBoard({ items: closet(), weather, gender: "male", perTpo: 5 });
+  const b = buildOutfitBoard({ items: closet(), weather, gender: "male", perTpo: 5 });
+  assert.deepEqual(a.map((s) => s.map((o) => o.sig)), b.map((s) => s.map((o) => o.sig)));
+  for (const set of a) {
+    assert.ok(set.length >= 2, "TPO 하나에 조합이 2벌 미만");
+    assert.equal(new Set(set.map((o) => o.sig)).size, set.length);
+  }
+});
+
+test("옷장이 비면 보드도 전부 빈다", () => {
+  const board = buildOutfitBoard({ items: [], weather, gender: "female" });
+  assert.deepEqual(board, [[], [], [], []]);
 });

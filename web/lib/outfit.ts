@@ -412,6 +412,10 @@ export interface VariantOptions {
   tpo: TpoDef;
   /** 최대 몇 벌까지 만들지 */
   limit?: number;
+  /** 다른 TPO 가 이미 대표로 쓴 조합 서명 — 첫 조합이 겹치지 않게 피한다 */
+  avoidSigs?: Set<string>;
+  /** 다른 TPO 대표 조합에 쓰인 옷 id — 겹칠수록 첫 조합에서 감점 */
+  avoidItems?: Set<string>;
 }
 
 /**
@@ -427,6 +431,8 @@ export function buildOutfitVariants({
   gender,
   tpo,
   limit = 8,
+  avoidSigs,
+  avoidItems,
 }: VariantOptions): Outfit[] {
   const wearable = wearableOf(items);
   if (wearable.length === 0) return [];
@@ -444,8 +450,15 @@ export function buildOutfitVariants({
     for (const c of ranked) {
       if (usedSigs.has(c.sig)) continue;
       // 이미 쓴 옷이 많이 겹칠수록 크게 감점 → 다음 조합은 실제로 달라진다
-      const overlap = comboIds(c.slots).reduce((s, id) => s + (usage.get(id) ?? 0), 0);
-      const adj = c.total - overlap * 9;
+      const ids = comboIds(c.slots);
+      const overlap = ids.reduce((s, id) => s + (usage.get(id) ?? 0), 0);
+      // 첫(대표) 조합은 다른 TPO 대표와 달라야 한다 — 출근 룩과 저녁 룩이 같아 보이지 않게
+      let cross = 0;
+      if (picked.length === 0) {
+        if (avoidSigs?.has(c.sig)) cross += 45;
+        if (avoidItems) cross += ids.filter((id) => avoidItems.has(id)).length * 7;
+      }
+      const adj = c.total - overlap * 9 - cross;
       if (
         !best ||
         adj > bestAdj ||
@@ -465,6 +478,35 @@ export function buildOutfitVariants({
     ...toOutfit(c, tpo, gender, weather),
     rank: i === 0 ? "BEST MATCH 01" : `다른 조합 ${String(i + 1).padStart(2, "0")}`,
   }));
+}
+
+export interface BoardOptions {
+  items: Item[];
+  weather: WeatherLike;
+  gender: Gender;
+  /** TPO 하나당 몇 벌까지 */
+  perTpo?: number;
+}
+
+/**
+ * TPO 4종의 조합 세트를 **한 번에** 만든다(TPOS 순서, 각 세트의 0번이 그 TPO 대표).
+ *
+ * TPO 별로 따로 만들면 출근·미팅과 저녁 약속이 같은 조합을 뽑는다(점수 상위가 겹치기 때문).
+ * 여기서는 앞선 TPO 가 대표로 쓴 조합·옷을 다음 TPO 의 첫 조합에서 감점해 서로 다르게 만든다.
+ * '다른 조합'으로 넘기는 2번째 이후는 그 TPO 안에서만 다양성을 본다.
+ */
+export function buildOutfitBoard({ items, weather, gender, perTpo = 8 }: BoardOptions): Outfit[][] {
+  const avoidSigs = new Set<string>();
+  const avoidItems = new Set<string>();
+  return TPOS.map((tpo) => {
+    const set = buildOutfitVariants({ items, weather, gender, tpo, limit: perTpo, avoidSigs, avoidItems });
+    const rep = set[0];
+    if (rep) {
+      avoidSigs.add(rep.sig);
+      for (const x of rep.items) avoidItems.add(x.id);
+    }
+    return set;
+  });
 }
 
 /** 날씨에 가장 잘 맞는 조합의 인덱스 — 사용자가 손대기 전 기본 선택 */
