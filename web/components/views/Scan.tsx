@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useApp } from "../app-context";
 import { Icon } from "../Sprite";
+import { fileToDataUrl } from "@/lib/image";
+import { wearCount, type Item } from "@/lib/data";
 
 interface ScanResult {
   verdict: "STOP" | "BUY" | "ALTERNATIVE";
@@ -10,22 +12,36 @@ interface ScanResult {
   ruleVersion: string;
   expectedCpw: number;
   expectedWears: number;
-  similar: { name: string; color: string; similarity: number }[];
+  /** ref = 요청에 보낸 내 옷장 배열 인덱스(실사진 매핑), 없으면 -1 */
+  similar: { name: string; color: string; similarity: number; ref?: number }[];
+  product: { name: string; category: string; color: string | null } | null;
   headline: string;
   reasons: { title: string; sub: string }[];
   alt: string;
   source: "openai" | "fallback";
 }
 
+// 비전이 읽은 상품 카테고리 → 폼 드롭다운 옵션 동기화
+const CATEGORY_TO_OPTION: Record<string, string> = {
+  상의: "니트 · 상의",
+  니트: "니트 · 상의",
+  아우터: "아우터",
+  하의: "하의",
+  신발: "신발",
+};
+
 export function ScanView() {
-  const { toast } = useApp();
+  const { toast, items } = useApp();
   const [productImg, setProductImg] = useState<string | null>(null);
+  const [scanData, setScanData] = useState<string | null>(null); // API 전송용 축소 data URL
   const [dragging, setDragging] = useState(false);
   const [category, setCategory] = useState("니트 · 상의");
   const [price, setPrice] = useState("79,000원");
   const [analyzeLabel, setAnalyzeLabel] = useState("내 옷장과 비교하기");
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<ScanResult | null>(null);
+  // 결과의 similar.ref 가 가리키는, 요청 시점의 옷장 스냅샷(실사진 렌더용)
+  const [sentWardrobe, setSentWardrobe] = useState<Item[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
   const urlRef = useRef<string | null>(null);
 
@@ -38,7 +54,7 @@ export function ScanView() {
   );
 
   // 실제로 추가(선택/드롭)한 이미지만 미리보기로 띄운다
-  const handleFile = (file: File | undefined | null) => {
+  const handleFile = async (file: File | undefined | null) => {
     if (!file) return;
     if (!file.type.startsWith("image/")) {
       toast("이미지 파일(JPG·PNG)만 올릴 수 있어요");
@@ -49,6 +65,11 @@ export function ScanView() {
     urlRef.current = url;
     setProductImg(url);
     toast("상품 사진을 불러왔어요");
+    try {
+      setScanData(await fileToDataUrl(file, 512, 0.8));
+    } catch {
+      setScanData(null);
+    }
   };
 
   const analyze = async () => {
@@ -56,22 +77,41 @@ export function ScanView() {
     setBusy(true);
     setAnalyzeLabel("내 옷장과 비교 중…");
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 12000);
+    // 사진 인식(비전) + 문구 생성이 이어지므로 여유 있게
+    const timer = setTimeout(() => controller.abort(), 25000);
+    const snapshot = items.slice(0, 48);
     try {
       const res = await fetch("/api/scan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ category, price }),
+        body: JSON.stringify({
+          category,
+          price,
+          image: scanData ?? undefined,
+          // 실제 내 옷장과 비교하도록 요약 목록을 함께 보낸다(이름·종류·대표색·착용수)
+          wardrobe: snapshot.map((x) => ({
+            name: x.name,
+            type: x.type,
+            color: x.color,
+            wear: wearCount(x.wear),
+          })),
+        }),
         signal: controller.signal,
       });
       if (!res.ok) throw new Error(`status ${res.status}`);
       const data: ScanResult = await res.json();
       if (!data || !data.verdict) throw new Error("unexpected response");
+      setSentWardrobe(snapshot);
       setResult(data);
       setAnalyzeLabel("다시 비교하기");
+      // 사진에서 읽은 카테고리를 폼에도 반영(사진과 판정 불일치 방지)
+      const opt = data.product ? CATEGORY_TO_OPTION[data.product.category] : undefined;
+      if (opt) setCategory(opt);
       toast(
-        data.source === "openai"
-          ? "GPT-4o가 결정 규칙 판정에 이유를 붙였어요"
+        data.product
+          ? `사진을 '${data.product.name}'(으)로 인식해 옷장과 비교했어요`
+          : data.source === "openai"
+          ? "AI가 결정 규칙 판정에 이유를 붙였어요"
           : "결정 규칙으로 판정을 완료했어요"
       );
     } catch {
@@ -133,7 +173,7 @@ export function ScanView() {
             />
             <Icon id="i-upload" />
             <b>상품 사진을 놓거나 클릭하세요</b>
-            <span>옷 · 신발 · 액세서리 JPG, PNG</span>
+            <span>옷 · 신발 · 가방 JPG, PNG</span>
             {productImg && (
               <div className="scan-product show">
                 <img src={productImg} alt="업로드한 상품" />
@@ -178,12 +218,20 @@ export function ScanView() {
                 <div className="verdict-mark" style={markStyle}>
                   {result.verdict}
                 </div>
-                <div>
+                <div className="verdict-text">
                   <h2>{result.headline}</h2>
                   <p>
+                    {result.product
+                      ? `AI 인식: ${result.product.name} · ${result.product.category} · `
+                      : ""}
                     중복 위험 {result.duplicationRisk}% · 결정 규칙 {result.ruleVersion}
                   </p>
                 </div>
+                {productImg && (
+                  <div className="verdict-photo">
+                    <img src={productImg} alt="분석한 상품 사진" />
+                  </div>
+                )}
               </div>
               <div className="reason-list">
                 {result.reasons.map((r, i) => (
@@ -201,14 +249,25 @@ export function ScanView() {
                 <span>유사도순</span>
               </div>
               <div className="similar-strip">
-                {result.similar.map((s, i) => (
-                  <div className="similar" key={i}>
-                    <div style={{ background: s.color }}></div>
-                    <p>
-                      {s.name} · {s.similarity}%
-                    </p>
-                  </div>
-                ))}
+                {result.similar.map((s, i) => {
+                  const owned =
+                    s.ref !== undefined && s.ref >= 0 ? sentWardrobe[s.ref] : undefined;
+                  return (
+                    <div className="similar" key={i}>
+                      {owned ? (
+                        <div className="similar-photo">
+                          <img src={owned.img} alt={owned.name} />
+                        </div>
+                      ) : (
+                        <div style={{ background: s.color || "#e3e8e4" }}></div>
+                      )}
+                      <p>
+                        {s.name}
+                        {s.similarity > 0 ? ` · ${s.similarity}%` : ""}
+                      </p>
+                    </div>
+                  );
+                })}
               </div>
               <div className="alt-box">
                 <b>대안 조합</b>

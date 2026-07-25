@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useApp } from "../app-context";
 import { Icon } from "../Sprite";
+import { careNote, objectParticle, wearCount } from "@/lib/data";
 
 interface Guide {
   title: string;
@@ -16,15 +17,6 @@ const DEFAULT_GUIDE: Guide = {
   tempC: 30,
   symbols: ["30°", "×△", "—", "●"],
   body: "찬물에서 울 전용 세제로 손세탁하고 비틀어 짜지 마세요. 평평하게 눕혀 그늘에서 말리는 것이 좋아요.",
-};
-
-const wearNum = (w: string) => parseInt(w.replace(/[^\d]/g, ""), 10) || 0;
-const careNote = (name: string) => {
-  if (/니트|울|캐시미어|스웨터|가디건/.test(name)) return "찬물 손세탁 권장";
-  if (/데님|진|청/.test(name)) return "뒤집어 단독 세탁";
-  if (/코트|트렌치|자켓|재킷|블레이저/.test(name)) return "부분 세탁·드라이 권장";
-  if (/로퍼|부츠|신발|스니커/.test(name)) return "전용 클리너 관리";
-  return "일반 세탁 가능";
 };
 
 export function CareView() {
@@ -49,7 +41,7 @@ export function CareView() {
       return next;
     });
     setClothingState(id, "available"); // 옷장 상태를 '입을 수 있음'으로 복귀
-    toast(`'${name}'을(를) 다시 옷장에 넣었어요`);
+    toast(`'${name}'${objectParticle(name)} 다시 옷장에 넣었어요`);
   };
 
   const labelScan = async () => {
@@ -57,7 +49,7 @@ export function CareView() {
     setScanning(true);
     toast("케어라벨을 분석하고 있어요");
     try {
-      const material = queue[0]?.name ?? "네이비 울 니트";
+      const material = queue[0]?.name ?? "울 니트";
       const res = await fetch("/api/care", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -68,7 +60,7 @@ export function CareView() {
       setGuide({ title: data.title, tempC: data.tempC, symbols: data.symbols, body: data.body });
       toast(
         data.source === "openai"
-          ? "GPT-4o가 소재에 맞는 케어 가이드를 정리했어요"
+          ? "AI가 소재에 맞는 케어 가이드를 정리했어요"
           : "소재 기준으로 케어 가이드를 불러왔어요"
       );
     } catch {
@@ -106,7 +98,7 @@ export function CareView() {
           ) : (
             queue.map((q) => {
               const isWashing = washing.has(q.id);
-              const progress = isWashing ? 100 : Math.min(96, 58 + wearNum(q.wear) * 2);
+              const progress = isWashing ? 100 : Math.min(96, 58 + wearCount(q.wear) * 2);
               return (
                 <div className="queue-item" key={q.id}>
                   <div className="thumb">

@@ -176,3 +176,61 @@ button,input,select{font:inherit}button{color:inherit}svg{display:block}.hidden{
 .chip:focus-visible,.btn:focus-visible,.cloth-del:focus-visible,.tpo-chip:focus-visible,.route-card:focus-visible,.modal-photo:focus-visible,.notif-item:focus-visible,.dropzone:focus-visible{outline:2px solid var(--forest);outline-offset:2px}
 /* 알림 패널 모바일 — 화면 밖 잘림 방지 */
 @media(max-width:520px){.notif-panel{position:fixed;left:10px;right:10px;top:64px;width:auto}}
+
+/* ---- Snap & Check 결과 — 긴 문장 줄바꿈·분석 사진·실사진 대체재 (2026-07-25) ---- */
+.verdict-top{align-items:flex-start}
+.verdict-top .verdict-text{min-width:0;flex:1}
+.verdict-top h2{font-size:21px;line-height:1.32;overflow-wrap:anywhere;word-break:keep-all}
+.verdict-top p{overflow-wrap:anywhere;word-break:keep-all}
+.verdict-photo{width:62px;height:62px;border-radius:16px;overflow:hidden;border:1px solid var(--line);flex:none;background:#f2f0ea}
+.verdict-photo img{width:100%;height:100%;object-fit:cover;display:block}
+.reason{align-items:flex-start}
+.reason-num{flex:none}
+.reason>div:last-child{min-width:0}
+.reason b,.reason span{overflow-wrap:anywhere;word-break:keep-all}
+.alt-box{overflow-wrap:anywhere;word-break:keep-all}
+.similar{min-width:0}
+.similar .similar-photo{height:62px;overflow:hidden;background:#f2f0ea}
+.similar .similar-photo img{width:100%;height:100%;object-fit:cover;display:block}
+.similar p{overflow-wrap:anywhere;word-break:keep-all}
+
+/* ---- 옷장 휴지통(삭제 복원) ---- */
+.trash-open svg{width:14px;height:14px}
+.trash-modal{max-width:520px}
+.trash-list{display:grid;gap:8px;max-height:340px;overflow:auto;margin-top:12px}
+.trash-row{display:flex;align-items:center;gap:11px;padding:10px;border:1px solid var(--line);border-radius:12px;background:#fbfaf7}
+.trash-thumb{width:46px;height:46px;border-radius:10px;overflow:hidden;flex:none;background:#eee9e0}
+.trash-thumb img{width:100%;height:100%;object-fit:cover;display:block}
+.trash-info{flex:1;min-width:0}
+.trash-info b{font-size:12px;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.trash-info span{display:block;font-size:9px;color:var(--sub);margin-top:2px}
+.trash-row .btn{padding:7px 10px;font-size:10px;flex:none}
+.trash-empty{padding:30px 8px;text-align:center;color:var(--sub)}
+.trash-empty svg{width:34px;height:34px;margin:0 auto 8px;display:block;color:#9eaaa6}
+.trash-empty b{display:block;font-size:13px;color:var(--ink);margin-bottom:4px}
+.trash-empty span{font-size:10px}
+
+/* ---- 홈 히어로 마네킹 착장 스테이지 + 로고 + 알림 읽음 + 순환 링크 (2026-07-25) ---- */
+.brand{padding:2px 6px 18px}
+.brand-btn{border:0;background:transparent;padding:0;cursor:pointer;border-radius:10px}
+.brand-btn:focus-visible{outline:2px solid var(--forest);outline-offset:3px}
+.brand .brand-logo{width:118px;height:auto;display:block}
+.mobile-logo .mobile-brand-logo{height:30px;width:auto;display:block}
+.rack.mannequin-rack{display:flex;align-items:flex-end;justify-content:center;grid-template-columns:none;width:100%;height:100%;padding:6px 0 0}
+.mannequin{height:100%;max-height:470px;max-width:100%;display:block;filter:drop-shadow(0 16px 26px rgba(23,42,36,.14))}
+.gender-toggle{position:absolute;top:14px;right:14px;z-index:3;display:flex;gap:3px;background:rgba(255,255,255,.78);backdrop-filter:blur(8px);border:1px solid var(--line);border-radius:999px;padding:3px}
+.gender-toggle button{border:0;background:transparent;font:inherit;font-size:10px;font-weight:800;padding:5px 12px;border-radius:999px;cursor:pointer;color:var(--sub)}
+.gender-toggle button.active{background:var(--forest);color:#fff}
+.stage-items{position:absolute;left:14px;bottom:14px;display:flex;gap:6px;z-index:3}
+.stage-chip{width:40px;height:40px;border-radius:12px;overflow:hidden;border:1px solid rgba(255,255,255,.85);box-shadow:0 6px 14px rgba(23,42,36,.16);background:#fff}
+.stage-chip img{width:100%;height:100%;object-fit:cover;display:block}
+.outfit-warn{margin:10px 0 0;padding:9px 11px;border-radius:11px;background:#fdf3e4;border:1px solid #ecd9b7;color:#8a6a33;font-size:10px;line-height:1.55}
+@keyframes doll-in{from{opacity:0;transform:translateY(12px) scale(.94)}to{opacity:1;transform:translateY(0) scale(1)}}
+.mannequin .doll-item{transform-box:fill-box;transform-origin:center;animation:doll-in .5s cubic-bezier(.34,1.45,.64,1) both}
+@media(prefers-reduced-motion:reduce){.mannequin .doll-item{animation:none}}
+.notif-item.read{opacity:.55}
+.notif-item.read b{font-weight:600}
+.notif-unread{width:7px;height:7px;border-radius:50%;background:#e36f59;flex:none;margin-left:auto;align-self:center}
+.route-partner{display:inline-block;margin-top:8px;font-size:9px;font-weight:900;color:var(--forest);letter-spacing:.02em}
+.route-card{cursor:pointer}
+@media(max-width:820px){.mannequin{max-height:320px}.stage-chip{width:32px;height:32px}.brand .brand-logo{width:120px}}

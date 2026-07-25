@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useContext } from "react";
-import type { ViewName, Item, ClothState } from "@/lib/data";
+import type { ViewName, Item, ClothState, TrashEntry } from "@/lib/data";
 
 export interface AppContextValue {
   view: ViewName;
@@ -13,9 +13,16 @@ export interface AppContextValue {
   logout: () => void;
   items: Item[];
   addClothing: (item: Omit<Item, "id">) => void;
-  removeClothing: (id: string) => void;
+  /** 삭제 = 휴지통으로 이동(복원 가능) */
+  removeClothing: (item: Item) => void;
   restoreClothing: (item: Item) => void;
   setClothingState: (id: string, state: ClothState) => void;
+  /** '오늘 입을게요' — 착장 구성 옷들을 착용 처리하고 세탁 대기열로 보낸다 */
+  wearOutfit: (imgs: string[]) => void;
+  trash: TrashEntry[];
+  restoreFromTrash: (id: string) => void;
+  /** id 지정 시 한 점 영구 삭제, 미지정 시 휴지통 비우기 */
+  purgeTrash: (id?: string) => void;
   favorites: Set<string>;
   toggleFavorite: (id: string) => void;
 }

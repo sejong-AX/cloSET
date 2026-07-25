@@ -7,8 +7,10 @@ import {
   initialItems,
   viewTitles,
   STATE_LABEL,
+  wearCount,
   type ClothState,
   type Item,
+  type TrashEntry,
   type ViewName,
 } from "@/lib/data";
 import { playViewEntrance, prefersReduced } from "@/lib/anim";
@@ -53,9 +55,9 @@ interface Notif {
   view: ViewName;
 }
 const NOTIFS: Notif[] = [
-  { icon: "🧺", title: "네이비 울 니트가 세탁 임계(3회)에 도달했어요", time: "2시간 전", view: "care" },
+  { icon: "🧺", title: "그레이 울 니트가 세탁 임계(3회)에 도달했어요", time: "2시간 전", view: "care" },
   { icon: "♻️", title: "브라운 울 코트를 126일째 안 입었어요 — 순환을 제안해요", time: "어제", view: "reuse" },
-  { icon: "☂️", title: "오후 비 확률 70% — 트렌치가 포함된 조합을 추천했어요", time: "오전 8:10", view: "home" },
+  { icon: "🌤️", title: "오늘 세종시 날씨에 맞춰 추천 조합을 갱신했어요", time: "오전 8:10", view: "home" },
 ];
 
 interface ToastAction {
@@ -69,6 +71,8 @@ interface AppShellProps {
 
 const ITEMS_KEY = "closet.items";
 const FAVS_KEY = "closet.favorites";
+const TRASH_KEY = "closet.trash";
+const TRASH_MAX = 20; // 사진 data URL 누적으로 저장소가 넘치지 않도록 상한
 
 export function AppShell({ toast, onLogout }: AppShellProps) {
   const [view, setView] = useState<ViewName>("home");
@@ -77,9 +81,11 @@ export function AppShell({ toast, onLogout }: AppShellProps) {
   // 감속 선호를 동기 초기화 → 최초 진입 애니메이션도 즉시 존중
   const [reduced] = useState<boolean>(() => prefersReduced());
   const [items, setItems] = useState<Item[]>(initialItems);
+  const [trash, setTrash] = useState<TrashEntry[]>([]);
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
   const [notifOpen, setNotifOpen] = useState(false);
-  const [notifRead, setNotifRead] = useState(false);
+  // 알림별 읽음 상태 — 항목을 열거나 '모두 읽음'을 눌러야 읽음 처리된다(패널 열림만으로는 아님)
+  const [notifRead, setNotifRead] = useState<Set<number>>(new Set());
   const [hydrated, setHydrated] = useState(false);
   const idCounter = useRef(0);
   const quotaWarned = useRef(false);
@@ -94,6 +100,9 @@ export function AppShell({ toast, onLogout }: AppShellProps) {
       const rawF = localStorage.getItem(FAVS_KEY);
       const parsedF = rawF ? JSON.parse(rawF) : null;
       if (Array.isArray(parsedF)) setFavorites(new Set(parsedF as string[]));
+      const rawT = localStorage.getItem(TRASH_KEY);
+      const parsedT = rawT ? JSON.parse(rawT) : null;
+      if (Array.isArray(parsedT)) setTrash(parsedT as TrashEntry[]);
     } catch {
       /* 손상된 저장소 무시 */
     }
@@ -106,6 +115,7 @@ export function AppShell({ toast, onLogout }: AppShellProps) {
     try {
       localStorage.setItem(ITEMS_KEY, JSON.stringify(items));
       localStorage.setItem(FAVS_KEY, JSON.stringify([...favorites]));
+      localStorage.setItem(TRASH_KEY, JSON.stringify(trash));
     } catch {
       // 용량 초과 등 저장 실패 — 사일런트 방지로 1회 안내(사진 일괄 등록 시 썸네일 누적)
       if (!quotaWarned.current) {
@@ -113,7 +123,7 @@ export function AppShell({ toast, onLogout }: AppShellProps) {
         toast("옷장 저장 공간이 가득 찼어요. 최근 변경은 이번 세션에만 유지돼요.");
       }
     }
-  }, [items, favorites, hydrated, toast]);
+  }, [items, favorites, trash, hydrated, toast]);
 
   const addClothing = useCallback((item: Omit<Item, "id">) => {
     idCounter.current += 1;
@@ -123,18 +133,58 @@ export function AppShell({ toast, onLogout }: AppShellProps) {
     setItems((prev) => [{ ...item, id }, ...prev]);
   }, []);
 
-  const removeClothing = useCallback((id: string) => {
-    setItems((prev) => prev.filter((x) => x.id !== id));
+  // 삭제 = 휴지통으로 이동. 실수로 지운 옷을 복원할 수 있다(상한 초과 시 오래된 것부터 밀려남).
+  const removeClothing = useCallback((item: Item) => {
+    setItems((prev) => prev.filter((x) => x.id !== item.id));
+    setTrash((prev) =>
+      [{ item, deletedAt: Date.now() }, ...prev.filter((e) => e.item.id !== item.id)].slice(
+        0,
+        TRASH_MAX
+      )
+    );
     setFavorites((prev) => {
-      if (!prev.has(id)) return prev;
+      if (!prev.has(item.id)) return prev;
       const next = new Set(prev);
-      next.delete(id);
+      next.delete(item.id);
       return next;
     });
   }, []);
 
   const restoreClothing = useCallback((item: Item) => {
     setItems((prev) => (prev.some((x) => x.id === item.id) ? prev : [item, ...prev]));
+    // 토스트 '되돌리기'로 복원돼도 휴지통에 남은 사본은 정리
+    setTrash((prev) => prev.filter((e) => e.item.id !== item.id));
+  }, []);
+
+  const restoreFromTrash = useCallback(
+    (id: string) => {
+      const entry = trash.find((e) => e.item.id === id);
+      if (!entry) return;
+      setTrash((prev) => prev.filter((e) => e.item.id !== id));
+      setItems((cur) => (cur.some((x) => x.id === entry.item.id) ? cur : [entry.item, ...cur]));
+    },
+    [trash]
+  );
+
+  const purgeTrash = useCallback((id?: string) => {
+    setTrash((prev) => (id === undefined ? [] : prev.filter((e) => e.item.id !== id)));
+  }, []);
+
+  // '오늘 입을게요' — 착장에 포함된 옷(사진 경로 매칭)을 착용 +1, 오늘 착용, 세탁 대기열로.
+  const wearOutfit = useCallback((imgs: string[]) => {
+    setItems((prev) =>
+      prev.map((x) =>
+        imgs.includes(x.img)
+          ? {
+              ...x,
+              wear: `${wearCount(x.wear) + 1}회`,
+              daysAgo: 0,
+              state: "laundry" as ClothState,
+              label: STATE_LABEL.laundry,
+            }
+          : x
+      )
+    );
   }, []);
 
   const setClothingState = useCallback((id: string, state: ClothState) => {
@@ -176,10 +226,9 @@ export function AppShell({ toast, onLogout }: AppShellProps) {
     };
   }, [view, reduced]);
 
-  // 알림 패널: 열리면 읽음 처리(점 제거) + Esc 닫기 + 첫 항목 포커스
+  // 알림 패널: Esc 닫기 + 첫 항목 포커스 (읽음 처리는 항목 클릭/모두 읽음에서만)
   useEffect(() => {
     if (!notifOpen) return;
-    setNotifRead(true);
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") setNotifOpen(false);
     };
@@ -187,6 +236,15 @@ export function AppShell({ toast, onLogout }: AppShellProps) {
     notifPanelRef.current?.querySelector<HTMLElement>("button")?.focus();
     return () => window.removeEventListener("keydown", onKey);
   }, [notifOpen]);
+
+  const unreadCount = NOTIFS.length - notifRead.size;
+  const markNotifRead = (i: number) =>
+    setNotifRead((prev) => {
+      if (prev.has(i)) return prev;
+      const next = new Set(prev);
+      next.add(i);
+      return next;
+    });
 
   const laundryCount = useMemo(
     () => items.filter((x) => x.state === "laundry").length,
@@ -207,6 +265,10 @@ export function AppShell({ toast, onLogout }: AppShellProps) {
       removeClothing,
       restoreClothing,
       setClothingState,
+      wearOutfit,
+      trash,
+      restoreFromTrash,
+      purgeTrash,
       favorites,
       toggleFavorite,
     }),
@@ -222,6 +284,10 @@ export function AppShell({ toast, onLogout }: AppShellProps) {
       removeClothing,
       restoreClothing,
       setClothingState,
+      wearOutfit,
+      trash,
+      restoreFromTrash,
+      purgeTrash,
       favorites,
       toggleFavorite,
     ]
@@ -240,12 +306,13 @@ export function AppShell({ toast, onLogout }: AppShellProps) {
       <div className="app" id="appRoot">
         <aside className="sidebar">
           <div className="brand">
-            <div className="brandmark">
-              <Icon id="i-closet" />
-            </div>
-            <div className="brandtext">
-              clo<b>SET</b>
-            </div>
+            <button
+              className="brand-btn"
+              aria-label="오늘의 착장으로 이동"
+              onClick={() => switchView("home")}
+            >
+              <img className="brand-logo" src="/brand/closet-logo.png" alt="cloSET" />
+            </button>
           </div>
           <div className="nav-label">My wardrobe</div>
           <nav className="nav">
@@ -300,12 +367,13 @@ export function AppShell({ toast, onLogout }: AppShellProps) {
         </aside>
         <main className="main">
           <header className="topbar">
-            <div className="mobile-logo">
-              <div className="brandmark">
-                <Icon id="i-closet" />
-              </div>
-              cloSET
-            </div>
+            <button
+              className="mobile-logo brand-btn"
+              aria-label="오늘의 착장으로 이동"
+              onClick={() => switchView("home")}
+            >
+              <img className="mobile-brand-logo" src="/brand/closet-logo.png" alt="cloSET" />
+            </button>
             <div className="crumb" id="crumb">
               {viewTitles[view]}
             </div>
@@ -321,25 +389,29 @@ export function AppShell({ toast, onLogout }: AppShellProps) {
             <div className="notif-wrap">
               <button
                 className="icon-btn"
-                aria-label="알림"
+                aria-label={unreadCount > 0 ? `알림 ${unreadCount}건 안 읽음` : "알림"}
                 aria-expanded={notifOpen}
                 onClick={() => setNotifOpen((o) => !o)}
               >
                 <Icon id="i-bell" />
-                {!notifRead && <span className="dot"></span>}
+                {unreadCount > 0 && <span className="dot"></span>}
               </button>
               {notifOpen && (
                 <>
                   <div className="notif-backdrop" onClick={() => setNotifOpen(false)} />
                   <div className="notif-panel" role="dialog" aria-label="알림" ref={notifPanelRef}>
                     <div className="notif-head">
-                      알림 <span>{NOTIFS.length}건</span>
+                      알림{" "}
+                      <span>
+                        {unreadCount > 0 ? `안 읽음 ${unreadCount}건` : "모두 읽음"}
+                      </span>
                     </div>
                     {NOTIFS.map((n, i) => (
                       <button
-                        className="notif-item"
+                        className={"notif-item" + (notifRead.has(i) ? " read" : "")}
                         key={i}
                         onClick={() => {
+                          markNotifRead(i);
                           setNotifOpen(false);
                           switchView(n.view);
                           toast("알림에서 이동했어요");
@@ -350,13 +422,15 @@ export function AppShell({ toast, onLogout }: AppShellProps) {
                           <b>{n.title}</b>
                           <span>{n.time}</span>
                         </span>
+                        {!notifRead.has(i) && <span className="notif-unread" aria-hidden="true" />}
                       </button>
                     ))}
                     <button
                       className="notif-all"
                       onClick={() => {
-                        setNotifRead(true);
+                        setNotifRead(new Set(NOTIFS.map((_, i) => i)));
                         setNotifOpen(false);
+                        toast("알림을 모두 읽음으로 표시했어요");
                       }}
                     >
                       모두 읽음으로 표시

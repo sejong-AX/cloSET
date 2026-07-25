@@ -24,10 +24,45 @@ export const STATE_LABEL: Record<ClothState, string> = {
   reuse: "순환 후보",
 };
 
+/** "12회" → 12. 숫자가 없으면 0. */
+export const wearCount = (wear: string) => parseInt(wear.replace(/[^\d]/g, ""), 10) || 0;
+
+/** 옷 이름으로 케어 방법 한 줄 안내(홈 케어 카드·케어 허브 공용) */
+export const careNote = (name: string) => {
+  if (/니트|울|캐시미어|스웨터|가디건/.test(name)) return "찬물 손세탁 권장";
+  if (/데님|진|청/.test(name)) return "뒤집어 단독 세탁";
+  if (/코트|트렌치|자켓|재킷|블레이저/.test(name)) return "부분 세탁·드라이 권장";
+  if (/로퍼|부츠|신발|스니커/.test(name)) return "전용 클리너 관리";
+  return "일반 세탁 가능";
+};
+
+/** 휴지통 항목 — 삭제된 옷과 삭제 시각(복원 기능용) */
+export interface TrashEntry {
+  item: Item;
+  deletedAt: number;
+}
+
+/** 받침 유무에 맞는 목적격 조사: 니트→를, 가디건→을. 한글이 아니면 '을(를)'. */
+export const objectParticle = (word: string) => {
+  const code = word.charCodeAt(word.length - 1);
+  if (code >= 0xac00 && code <= 0xd7a3) return (code - 0xac00) % 28 ? "을" : "를";
+  return "을(를)";
+};
+
+/** 방향격 조사: 당근→으로, 아름다운가게→로 (받침 ㄹ은 '로'). 한글이 아니면 '(으)로'. */
+export const directionParticle = (word: string) => {
+  const code = word.charCodeAt(word.length - 1);
+  if (code >= 0xac00 && code <= 0xd7a3) {
+    const jong = (code - 0xac00) % 28;
+    return jong === 0 || jong === 8 ? "로" : "으로";
+  }
+  return "(으)로";
+};
+
 // 샘플 옷장 — mockup/index.html 의 items 배열 기반 시드 데이터 + 실제 옷 사진(Pexels, public/items)
 const SEED: Omit<Item, "id" | "daysAgo">[] = [
   { name: "베이지 트렌치코트", cat: "아우터 · 옷장 1", state: "available", label: "입을 수 있음", bg: "#e9e0d3", type: "coat", color: "#8f806f", wear: "12회", cpw: "₩10,750", img: "/items/coat.jpg" },
-  { name: "네이비 울 니트", cat: "상의 · 옷장 2", state: "laundry", label: "세탁 필요", bg: "#dfe7e8", type: "top-g", color: "#233d56", wear: "14회", cpw: "₩6,350", img: "/items/knit.jpg" },
+  { name: "그레이 울 니트", cat: "상의 · 옷장 2", state: "laundry", label: "세탁 필요", bg: "#dfe7e8", type: "top-g", color: "#8a8478", wear: "14회", cpw: "₩6,350", img: "/items/knit.jpg" },
   { name: "크림 와이드 팬츠", cat: "하의 · 옷장 1", state: "available", label: "입을 수 있음", bg: "#ede9df", type: "pants", color: "#d2cabc", wear: "9회", cpw: "₩7,650", img: "/items/pants.jpg" },
   { name: "브라운 울 코트", cat: "아우터 · 계절 보관함", state: "reuse", label: "순환 후보", bg: "#e5ded6", type: "coat", color: "#887b6d", wear: "8회", cpw: "₩43,000", img: "/items/coat-brown.jpg" },
   { name: "그레이 스페클 니트", cat: "상의 · 옷장 2", state: "available", label: "입을 수 있음", bg: "#dadfdd", type: "top-g", color: "#8a8f8c", wear: "4회", cpw: "₩19,750", img: "/items/knit-speckle.jpg" },

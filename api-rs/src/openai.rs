@@ -1,5 +1,10 @@
-//! GPT-4o 호출 + 결정적 폴백 (web/app/api/*/route.ts 의 Rust 포팅).
-//! 판정 수치는 rules 가 정하고, 여기서는 "이유 문장"만 생성한다. 키/네트워크 실패 시 폴백.
+//! OpenAI 호출 + 결정적 폴백.
+//! 판정 수치는 rules 가 정하고, LLM 은 "이유 문장"과 "사진 인식(비전)"만 담당한다. 키/네트워크 실패 시 폴백.
+//!
+//! 모델 정책 (2026-07 업그레이드):
+//! - 기본 gpt-5.1 + reasoning_effort "none" → 4o 대비 인식 정확도(특히 bbox·소재·핏)가 크게 높고 지연은 수 초 수준.
+//! - gpt-5.x 계열은 temperature 미지원 → 생략, max_tokens 대신 max_completion_tokens 사용.
+//! - 1차 모델이 HTTP 오류(파라미터·권한 등)로 실패하면 gpt-4o 로 1회 재시도. 타임아웃은 재시도 없이 결정적 폴백.
 
 use crate::rules::{comma, CareFacts, ScanFacts, Verdict};
 use serde_json::{json, Value};
@@ -8,8 +13,14 @@ use std::time::Duration;
 pub type Reason = (String, String); // (title, sub)
 pub type ScanCopy = (String, Vec<Reason>, String); // (headline, reasons, alt)
 
+pub const DEFAULT_MODEL: &str = "gpt-5.1";
+const RESCUE_MODEL: &str = "gpt-4o";
+
 pub fn model_name() -> String {
-    std::env::var("OPENAI_MODEL").unwrap_or_else(|_| "gpt-4o".to_string())
+    std::env::var("OPENAI_MODEL")
+        .ok()
+        .filter(|m| !m.trim().is_empty())
+        .unwrap_or_else(|| DEFAULT_MODEL.to_string())
 }
 
 fn api_key() -> Option<String> {
@@ -19,9 +30,112 @@ fn api_key() -> Option<String> {
     }
 }
 
+/// gpt-5/o 계열(추론 모델군) 여부 — 파라미터 규칙이 다르다.
+pub fn is_reasoning_family(model: &str) -> bool {
+    model.starts_with("gpt-5") || model.starts_with("o1") || model.starts_with("o3") || model.starts_with("o4")
+}
+
+/// 모델군에 맞는 chat/completions 요청 본문을 만든다.
+/// gpt-5.1 은 reasoning_effort "none"(가장 빠름), 그 외 gpt-5/o 계열은 "minimal"(하한).
+pub fn build_request(model: &str, messages: Value, max_out: u32, temperature: f32) -> Value {
+    let mut body = json!({
+        "model": model,
+        "response_format": { "type": "json_object" },
+        "messages": messages,
+    });
+    if is_reasoning_family(model) {
+        body["max_completion_tokens"] = json!(max_out);
+        body["reasoning_effort"] = json!(if model.starts_with("gpt-5.1") { "none" } else { "minimal" });
+    } else {
+        body["max_tokens"] = json!(max_out);
+        body["temperature"] = json!(temperature);
+    }
+    body
+}
+
+/// 단일 chat 호출 → content 를 JSON 으로 파싱해 반환.
+/// Err(true) = HTTP 오류(다른 모델로 재시도 가치 있음), Err(false) = 타임아웃/네트워크(재시도 무의미).
+async fn chat_once(
+    client: &reqwest::Client,
+    key: &str,
+    model: &str,
+    messages: &Value,
+    max_out: u32,
+    temperature: f32,
+) -> Result<Value, bool> {
+    let resp = client
+        .post("https://api.openai.com/v1/chat/completions")
+        .bearer_auth(key)
+        .json(&build_request(model, messages.clone(), max_out, temperature))
+        .send()
+        .await
+        .map_err(|e| !e.is_timeout() && !e.is_connect())?;
+    if !resp.status().is_success() {
+        return Err(true);
+    }
+    let data: Value = resp.json().await.map_err(|_| false)?;
+    let content = data["choices"][0]["message"]["content"].as_str().ok_or(false)?;
+    serde_json::from_str::<Value>(content).map_err(|_| false)
+}
+
+/// 메시지 → JSON 응답. 1차 모델 실패(HTTP 오류)면 gpt-4o 로 1회 구조.
+async fn chat_json_messages(messages: Value, max_out: u32, temperature: f32, timeout_secs: u64) -> Option<Value> {
+    let key = api_key()?;
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(timeout_secs))
+        .build()
+        .ok()?;
+    let primary = model_name();
+    match chat_once(&client, &key, &primary, &messages, max_out, temperature).await {
+        Ok(v) => Some(v),
+        Err(retryable) if retryable && primary != RESCUE_MODEL => {
+            chat_once(&client, &key, RESCUE_MODEL, &messages, max_out, temperature).await.ok()
+        }
+        Err(_) => None,
+    }
+}
+
+fn text_messages(system: &str, user: &str) -> Value {
+    json!([
+        { "role": "system", "content": system },
+        { "role": "user", "content": user }
+    ])
+}
+
+fn vision_messages(system: &str, user_text: &str, image_data_url: &str) -> Value {
+    json!([
+        { "role": "system", "content": system },
+        { "role": "user", "content": [
+            { "type": "text", "text": user_text },
+            { "type": "image_url", "image_url": { "url": image_data_url } }
+        ]}
+    ])
+}
+
 /// 결정적 폴백 — OpenAI 가 없거나 실패해도 올바른 판정 문구를 반환한다.
 pub fn fallback_copy(f: &ScanFacts) -> ScanCopy {
     let top = &f.similar[0];
+    // 옷장에 겹치는 패밀리가 아예 없는 경우(합성 항목) — 이름 인용 없이 공백 채움 카피
+    if top.similarity == 0 {
+        return (
+            "지금은 사도 괜찮아요.".to_string(),
+            vec![
+                (
+                    "옷장에 같은 계열 옷이 없어요.".to_string(),
+                    "이 카테고리는 실제 공백이라 중복 위험이 낮아요.".to_string(),
+                ),
+                (
+                    format!("예상 회당 비용이 {}원이에요.", comma(f.expected_cpw)),
+                    format!("예상 착용 {}회 기준 추정치예요.", f.expected_wears),
+                ),
+                (
+                    "새 조합의 축이 될 수 있어요.".to_string(),
+                    "기존 옷들과 섞어 입을수록 회당 비용이 내려가요.".to_string(),
+                ),
+            ],
+            "보유한 상의·하의와 톤을 맞춰 조합하면 활용도가 빠르게 올라가요.".to_string(),
+        );
+    }
     match f.verdict {
         Verdict::Stop => (
             "잠깐, 비슷한 옷이 있어요.".to_string(),
@@ -32,14 +146,14 @@ pub fn fallback_copy(f: &ScanFacts) -> ScanCopy {
                 ),
                 (
                     format!("비슷한 스타일은 평균 {}회만 입었어요.", f.avg_wears_similar),
-                    "최근 구매 3건의 확정 착용 로그 기준".to_string(),
+                    "옷장의 확정 착용 기록 기준".to_string(),
                 ),
                 (
                     format!("예상 회당 비용이 {}원이에요.", comma(f.expected_cpw)),
                     format!("예상 착용 {}회 기준이며 추정치예요.", f.expected_wears),
                 ),
             ],
-            format!("{} + 크림 와이드 팬츠를 입으면 촬영한 룩과 93% 비슷해요.", top.name),
+            format!("{}을(를) 먼저 꺼내 입으면 촬영한 룩과 거의 같은 무드를 낼 수 있어요.", top.name),
         ),
         Verdict::Alternative => (
             "비슷하게 대체할 수 있어요.".to_string(),
@@ -57,7 +171,7 @@ pub fn fallback_copy(f: &ScanFacts) -> ScanCopy {
                     format!("예상 착용 {}회 기준 추정치예요.", f.expected_wears),
                 ),
             ],
-            format!("{} + 차콜 슬랙스 조합으로 먼저 시도해 보는 걸 추천해요.", top.name),
+            format!("{} 중심의 조합을 먼저 시도해 보는 걸 추천해요.", top.name),
         ),
         Verdict::Buy => (
             "지금은 사도 괜찮아요.".to_string(),
@@ -80,8 +194,9 @@ pub fn fallback_copy(f: &ScanFacts) -> ScanCopy {
     }
 }
 
-fn facts_json(f: &ScanFacts) -> Value {
+fn facts_json(f: &ScanFacts, product_name: Option<&str>) -> Value {
     json!({
+        "product": product_name,
         "category": f.category,
         "family": f.family.as_str(),
         "verdict": f.verdict.as_str(),
@@ -95,49 +210,21 @@ fn facts_json(f: &ScanFacts) -> Value {
     })
 }
 
-async fn chat_json(system: &str, user: &str, temperature: f32) -> Option<Value> {
-    let key = api_key()?;
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(8)) // 플랫폼 함수 타임아웃(~10s)보다 짧게 → 폴백 확보
-        .build()
-        .ok()?;
-    let resp = client
-        .post("https://api.openai.com/v1/chat/completions")
-        .bearer_auth(&key)
-        .json(&json!({
-            "model": model_name(),
-            "temperature": temperature,
-            "response_format": { "type": "json_object" },
-            "messages": [
-                { "role": "system", "content": system },
-                { "role": "user", "content": user }
-            ]
-        }))
-        .send()
-        .await
-        .ok()?;
-    if !resp.status().is_success() {
-        return None;
-    }
-    let data: Value = resp.json().await.ok()?;
-    let content = data["choices"][0]["message"]["content"].as_str()?;
-    serde_json::from_str::<Value>(content).ok()
-}
-
 /// scan 이유 문장 생성. 실패 시 None → 호출부에서 fallback.
-pub async fn scan_llm_copy(f: &ScanFacts) -> Option<ScanCopy> {
+pub async fn scan_llm_copy(f: &ScanFacts, product_name: Option<&str>) -> Option<ScanCopy> {
     let system = concat!(
         "너는 cloSET의 카피라이터다. cloSET은 '덜 사고 덜 버리고 더 오래 입게' 돕는 AI 디지털 옷장이다.\n",
-        "말투는 따뜻하고 담백한 한국어 존댓말. 과장·이모지·느낌표 남발 금지.\n",
+        "말투는 따뜻하고 담백한 한국어 존댓말. 과장·이모지·느낌표 남발 금지. headline 은 18자 이내, title 은 28자 이내, sub 는 40자 이내로 짧게.\n",
         "핵심 규칙: 판정(verdict), 중복 위험(duplicationRisk), 회당 비용(expectedCpw), 유사도(similarity)는 이미 코드가 계산한 확정 수치다.\n",
         "너는 이 수치를 절대 바꾸지 말고, 주어진 값만 사용해 이유를 자연스럽게 설명한다. 새로운 수치를 지어내지 않는다.\n",
+        "similar 에 적힌 옷 이름은 사용자가 실제로 가진 옷이니 그대로 인용한다.\n",
         "반드시 아래 JSON 스키마로만 답한다: {\"headline\": string, \"reasons\": [{\"title\": string, \"sub\": string}] (정확히 3개), \"alt\": string}"
     );
     let user = format!(
         "다음 확정 사실로 구매 점검 결과 문구를 작성해줘.\n{}",
-        serde_json::to_string_pretty(&facts_json(f)).ok()?
+        serde_json::to_string_pretty(&facts_json(f, product_name)).ok()?
     );
-    let parsed = chat_json(system, &user, 0.6).await?;
+    let parsed = chat_json_messages(text_messages(system, &user), 600, 0.6, 8).await?;
     let headline = parsed["headline"].as_str()?.to_string();
     let reasons_v = parsed["reasons"].as_array()?;
     if reasons_v.len() != 3 {
@@ -170,7 +257,7 @@ pub async fn care_llm_guide(f: &CareFacts) -> Option<String> {
         }))
         .ok()?
     );
-    let parsed = chat_json(system, &user, 0.5).await?;
+    let parsed = chat_json_messages(text_messages(system, &user), 400, 0.5, 8).await?;
     let body = parsed["body"].as_str()?.trim().to_string();
     if body.is_empty() {
         None
@@ -179,13 +266,8 @@ pub async fn care_llm_guide(f: &CareFacts) -> Option<String> {
     }
 }
 
-/// 사진(data URL) → GPT-4o 비전으로 체형 맞춤 스타일 추천. 실패 시 None → 결정적 폴백.
+/// 사진(data URL) → 비전으로 체형 맞춤 스타일 추천. 실패 시 None → 결정적 폴백.
 pub async fn style_recommend(image_data_url: &str, body_type: &str, season: &str) -> Option<Value> {
-    let key = api_key()?;
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(9))
-        .build()
-        .ok()?;
     let system = concat!(
         "너는 cloSET의 퍼스널 스타일리스트다. 사용자가 올린 사진에서 체형·실루엣·비율을 관찰해, ",
         "그 체형에 어울리는 옷 실루엣과 스타일링을 추천한다. 외모 평가·신원·얼굴 언급은 하지 말고 옷 실루엣 중심으로만 조언한다. ",
@@ -197,31 +279,7 @@ pub async fn style_recommend(image_data_url: &str, body_type: &str, season: &str
         "참고 프로필 — 체형 유형: {}, 시즌 컬러: {}. 사진 속 인물의 체형·어깨·허리 비율에 맞는 옷 실루엣과 코디를 추천해줘.",
         body_type, season
     );
-    let resp = client
-        .post("https://api.openai.com/v1/chat/completions")
-        .bearer_auth(&key)
-        .json(&json!({
-            "model": model_name(),
-            "temperature": 0.5,
-            "max_tokens": 700,
-            "response_format": { "type": "json_object" },
-            "messages": [
-                { "role": "system", "content": system },
-                { "role": "user", "content": [
-                    { "type": "text", "text": user_text },
-                    { "type": "image_url", "image_url": { "url": image_data_url } }
-                ]}
-            ]
-        }))
-        .send()
-        .await
-        .ok()?;
-    if !resp.status().is_success() {
-        return None;
-    }
-    let data: Value = resp.json().await.ok()?;
-    let content = data["choices"][0]["message"]["content"].as_str()?;
-    let parsed: Value = serde_json::from_str(content).ok()?;
+    let parsed = chat_json_messages(vision_messages(system, &user_text, image_data_url), 900, 0.5, 18).await?;
     if parsed.get("summary").and_then(|v| v.as_str()).is_some()
         && parsed
             .get("tips")
@@ -286,51 +344,25 @@ pub fn style_fallback(body_type: &str) -> Value {
     })
 }
 
-/// 사진(data URL) → GPT-4o 비전으로 옷장/갤러리 속 의류 아이템 목록 식별. 실패 시 None → 폴백.
+/// 사진(data URL) → 비전으로 옷장/갤러리 속 의류 아이템 목록 식별(품목별 bbox 포함). 실패 시 None → 폴백.
+/// 액세서리(선글라스 포함)는 등록 대상이 아니므로 모델 단계에서 제외를 지시한다.
 pub async fn wardrobe_detect(image_data_url: &str) -> Option<Value> {
-    let key = api_key()?;
-    let client = reqwest::Client::builder()
-        // 서버리스 함수 최대 실행시간(플랫폼별 ~10s) 안에서 폴백이 확보되도록 짧게
-        .timeout(Duration::from_secs(9))
-        .build()
-        .ok()?;
     let system = concat!(
         "너는 cloSET의 옷장 정리 어시스턴트다. 사용자가 올린 사진(옷장 전체·옷걸이·개별 옷 사진 등)에서 ",
         "보이는 의류·패션 아이템을 하나씩 식별해 목록으로 만든다. 사람·얼굴·배경·가구·행거는 무시하고 착용 아이템만 담는다. ",
+        "액세서리(선글라스·안경·모자·주얼리·시계·벨트·스카프·머플러·장갑·양말 등)는 절대 목록에 넣지 않는다. ",
         "외모·신원 언급 금지. 확실하지 않은 항목은 넣지 말고(과분류 금지) 뚜렷이 보이는 것만 담는다. 최대 10개. ",
         "각 항목 필드 — name: 색과 종류를 담은 짧은 한국어 이름(예: '네이비 니트'), ",
-        "category: 반드시 [상의, 하의, 아우터, 니트, 원피스, 신발, 가방, 액세서리] 중 하나, ",
+        "category: 반드시 [상의, 하의, 아우터, 니트, 원피스, 신발, 가방] 중 하나, ",
         "color: 한국어 색 이름, material: 추정 소재(모르면 빈 문자열), ",
         "fit: 핏·실루엣을 한 단어로(슬림·레귤러·루즈·오버핏·와이드·크롭·롱·스트레이트·테이퍼드 등). ",
         "색과 종류가 비슷해도 핏이 다르면 서로 다른 옷이므로 fit 을 반드시 구분해 적어 두 옷을 식별할 수 있게 한다. 판단이 어려우면 빈 문자열. ",
-        "반드시 아래 JSON 으로만 답한다: {\"items\": [{\"name\": string, \"category\": string, \"color\": string, \"material\": string, \"fit\": string}]}"
+        "box: 그 아이템 하나가 사진에서 차지하는 최소 사각 영역. 사진 왼쪽 위가 원점이고 x,y,w,h 를 사진 크기 대비 백분율 정수(0~100)로 적는다. ",
+        "box 는 반드시 해당 아이템만 최대한 타이트하게 감싸야 하고 다른 아이템을 포함하면 안 된다. ",
+        "반드시 아래 JSON 으로만 답한다: {\"items\": [{\"name\": string, \"category\": string, \"color\": string, \"material\": string, \"fit\": string, \"box\": {\"x\": int, \"y\": int, \"w\": int, \"h\": int}}]}"
     );
-    let user_text = "이 사진에서 보이는 옷과 패션 아이템을 모두 찾아 목록으로 만들어줘. 색·종류가 비슷한 옷은 핏(실루엣)으로 구분해줘.";
-    let resp = client
-        .post("https://api.openai.com/v1/chat/completions")
-        .bearer_auth(&key)
-        .json(&json!({
-            "model": model_name(),
-            "temperature": 0.2,
-            "max_tokens": 1200,
-            "response_format": { "type": "json_object" },
-            "messages": [
-                { "role": "system", "content": system },
-                { "role": "user", "content": [
-                    { "type": "text", "text": user_text },
-                    { "type": "image_url", "image_url": { "url": image_data_url } }
-                ]}
-            ]
-        }))
-        .send()
-        .await
-        .ok()?;
-    if !resp.status().is_success() {
-        return None;
-    }
-    let data: Value = resp.json().await.ok()?;
-    let content = data["choices"][0]["message"]["content"].as_str()?;
-    let parsed: Value = serde_json::from_str(content).ok()?;
+    let user_text = "이 사진에서 보이는 옷과 패션 아이템을 모두 찾아 목록으로 만들어줘. 각 아이템의 box 영역을 정확히 표시하고, 액세서리는 빼줘.";
+    let parsed = chat_json_messages(vision_messages(system, user_text, image_data_url), 1600, 0.2, 22).await?;
     // items 배열이 존재해야 유효(빈 배열도 유효 — '옷을 못 찾음'을 뜻함)
     parsed.get("items").and_then(|v| v.as_array())?;
     Some(parsed)
@@ -343,4 +375,24 @@ pub fn wardrobe_fallback() -> Value {
         "source": "fallback",
         "model": Value::Null,
     })
+}
+
+/// Snap & Check — 사진 속 '구매 후보 상품' 1개를 식별한다. 실패 시 None(카테고리 입력값으로 판정).
+pub async fn scan_detect_product(image_data_url: &str) -> Option<Value> {
+    let system = concat!(
+        "너는 cloSET의 상품 인식 어시스턴트다. 사용자가 구매를 고민하며 올린 사진에서 ",
+        "가장 주된 패션 상품 1개만 식별한다. 사람·배경·로고·매장 진열은 무시한다. ",
+        "반드시 아래 JSON 으로만 답한다: {\"name\": string(색+종류를 담은 짧은 한국어 이름), ",
+        "\"category\": [상의, 하의, 아우터, 니트, 원피스, 신발, 가방, 액세서리] 중 하나, ",
+        "\"color\": string(한국어 색 이름), \"colorHex\": string(상품 대표색 #rrggbb)}"
+    );
+    let user_text = "이 사진의 상품이 무엇인지 알려줘.";
+    let parsed = chat_json_messages(vision_messages(system, user_text, image_data_url), 200, 0.2, 8).await?;
+    let name_ok = parsed.get("name").and_then(|v| v.as_str()).map(|s| !s.trim().is_empty()).unwrap_or(false);
+    let cat_ok = parsed.get("category").and_then(|v| v.as_str()).map(|s| !s.trim().is_empty()).unwrap_or(false);
+    if name_ok && cat_ok {
+        Some(parsed)
+    } else {
+        None
+    }
 }

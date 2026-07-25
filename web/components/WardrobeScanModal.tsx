@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useApp } from "./app-context";
 import { Icon } from "./Sprite";
 import type { ClothState } from "@/lib/data";
+import { cropDataUrl, loadImage, scaleImage, type Box } from "@/lib/image";
 
 interface Props {
   open: boolean;
@@ -17,6 +18,7 @@ interface RawItem {
   color?: string;
   material?: string;
   fit?: string;
+  box?: Box; // 품목이 사진에서 차지하는 영역(백분율) — 품목별 썸네일 크롭에 사용
 }
 interface Draft {
   id: string;
@@ -29,7 +31,8 @@ interface Draft {
   checked: boolean;
 }
 
-const CATEGORY_OPTIONS = ["상의", "니트", "하의", "아우터", "원피스", "신발", "가방", "액세서리"];
+// 액세서리(선글라스 포함)는 분석·등록 대상에서 제외한다
+const CATEGORY_OPTIONS = ["상의", "니트", "하의", "아우터", "원피스", "신발", "가방"];
 // 색·종류가 비슷한 옷을 핏으로 구분한다
 const FIT_OPTIONS = [
   "",
@@ -87,18 +90,6 @@ function normalizeFit(raw?: string): string {
 }
 
 // 한 번의 이미지 로드로 분석용(큰)·썸네일용(작은) data URL 두 개 생성
-function scale(img: HTMLImageElement, max: number, q: number): string {
-  const s = Math.min(1, max / Math.max(img.width, img.height));
-  const w = Math.max(1, Math.round(img.width * s));
-  const h = Math.max(1, Math.round(img.height * s));
-  const c = document.createElement("canvas");
-  c.width = w;
-  c.height = h;
-  const cx = c.getContext("2d");
-  if (!cx) return img.src;
-  cx.drawImage(img, 0, 0, w, h);
-  return c.toDataURL("image/jpeg", q);
-}
 function downscale(file: File): Promise<{ analyzeUrl: string; thumbUrl: string }> {
   return new Promise((resolve, reject) => {
     if (!file.type.startsWith("image/")) {
@@ -107,12 +98,13 @@ function downscale(file: File): Promise<{ analyzeUrl: string; thumbUrl: string }
     }
     const reader = new FileReader();
     reader.onerror = () => reject(new Error("read"));
-    reader.onload = () => {
-      const img = new Image();
-      img.onerror = () => reject(new Error("img"));
-      img.onload = () =>
-        resolve({ analyzeUrl: scale(img, 768, 0.82), thumbUrl: scale(img, 384, 0.62) });
-      img.src = reader.result as string;
+    reader.onload = async () => {
+      try {
+        const img = await loadImage(reader.result as string);
+        resolve({ analyzeUrl: scaleImage(img, 768, 0.82), thumbUrl: scaleImage(img, 384, 0.62) });
+      } catch (e) {
+        reject(e);
+      }
     };
     reader.readAsDataURL(file);
   });
@@ -127,6 +119,7 @@ export function WardrobeScanModal({ open, onClose, onAdded }: Props) {
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const [aiCount, setAiCount] = useState(0);
   const [skipped, setSkipped] = useState(0);
+  const [accSkipped, setAccSkipped] = useState(0); // 액세서리로 판정되어 제외한 수
   const cameraRef = useRef<HTMLInputElement>(null);
   const galleryRef = useRef<HTMLInputElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -141,6 +134,7 @@ export function WardrobeScanModal({ open, onClose, onAdded }: Props) {
     setDrafts([]);
     setAiCount(0);
     setSkipped(0);
+    setAccSkipped(0);
     seq.current = 0;
     busy.current = false;
     appendRef.current = false;
@@ -236,11 +230,13 @@ export function WardrobeScanModal({ open, onClose, onAdded }: Props) {
       setDrafts([]);
       setAiCount(0);
       setSkipped(0);
+      setAccSkipped(0);
       seq.current = 0;
     }
     let done = 0;
     let detected = 0;
     let localSkipped = 0;
+    let localAcc = 0;
 
     const worker = async (start: number) => {
       for (let i = start; i < files.length; i += POOL) {
@@ -253,13 +249,21 @@ export function WardrobeScanModal({ open, onClose, onAdded }: Props) {
           } catch {
             items = [];
           }
+          // 액세서리(선글라스·모자 등)는 등록 대상이 아니다 — 모델이 걸러도 한 번 더 방어
+          const kept = items.filter((it) => normalizeCat(it.category) !== "액세서리");
+          localAcc += items.length - kept.length;
           if (items.length === 0) {
             // 옷을 못 찾았거나 분석 실패 → 사진을 잃지 않도록 편집 초안 1점
             collected.push(makeDraft(thumbUrl, { name: "새 옷", category: "상의" }));
-          } else {
-            detected += items.length;
-            for (const it of items) collected.push(makeDraft(thumbUrl, it));
+          } else if (kept.length > 0) {
+            detected += kept.length;
+            // 품목별로 사진에서 해당 영역만 잘라 각자의 썸네일을 만든다(실패 시 원본 축소본)
+            for (const it of kept) {
+              const cropped = await cropDataUrl(analyzeUrl, it.box);
+              collected.push(makeDraft(cropped ?? thumbUrl, it));
+            }
           }
+          // items 는 있었지만 전부 액세서리 → 초안을 만들지 않고 제외 집계만
         } catch {
           // 이미지가 아니거나(HEIC 등) 로드 실패 → 건너뛰고 집계
           localSkipped += 1;
@@ -276,8 +280,11 @@ export function WardrobeScanModal({ open, onClose, onAdded }: Props) {
     setDrafts(collected);
     setAiCount((prev) => (append ? prev : 0) + detected);
     setSkipped((prev) => (append ? prev : 0) + localSkipped);
+    setAccSkipped((prev) => (append ? prev : 0) + localAcc);
     if (localSkipped > 0) {
       toast(`${localSkipped}장은 읽을 수 없는 형식이라 건너뛰었어요`);
+    } else if (localAcc > 0) {
+      toast(`액세서리 ${localAcc}점은 등록 대상에서 제외했어요`);
     }
     setPhase("review");
     busy.current = false;
@@ -306,7 +313,7 @@ export function WardrobeScanModal({ open, onClose, onAdded }: Props) {
       const meta = CAT_META[d.category] ?? CAT_META["상의"];
       addClothing({
         name: d.name.trim() || "새 옷",
-        cat: `${d.category} · 옷장`,
+        cat: `${d.category} · 옷장 1`,
         state: "available" as ClothState,
         label: "입을 수 있음",
         bg: meta.bg,
@@ -344,8 +351,9 @@ export function WardrobeScanModal({ open, onClose, onAdded }: Props) {
       >
         <h2 id="wsTitle">사진으로 옷장 채우기</h2>
         <p>
-          옷장을 촬영하거나 갤러리 사진을 고르면 AI가 사진 속 옷을 찾아 목록으로 만들어요. 고른 옷의
-          축소 썸네일은 옷장 항목 이미지로 이 기기에만 저장되고, 원본 사진은 분석에만 쓰여요.
+          옷장을 촬영하거나 갤러리 사진을 고르면 AI가 사진 속 옷을 찾아 품목별로 잘라낸 썸네일과
+          함께 목록으로 만들어요. 썸네일은 이 기기에만 저장되고 원본 사진은 분석에만 쓰여요.
+          액세서리(선글라스 등)는 등록하지 않아요.
         </p>
 
         <input
@@ -413,10 +421,18 @@ export function WardrobeScanModal({ open, onClose, onAdded }: Props) {
         {phase === "review" &&
           (drafts.length === 0 ? (
             <div className="ws-empty">
-              <b>{skipped > 0 ? "사진을 읽을 수 없어요" : "사진에서 옷을 찾지 못했어요"}</b>
+              <b>
+                {skipped > 0
+                  ? "사진을 읽을 수 없어요"
+                  : accSkipped > 0
+                  ? "등록할 옷을 찾지 못했어요"
+                  : "사진에서 옷을 찾지 못했어요"}
+              </b>
               <p>
                 {skipped > 0
                   ? "HEIC 등 지원하지 않는 형식일 수 있어요. JPG·PNG 사진으로 다시 시도해 보세요."
+                  : accSkipped > 0
+                  ? `액세서리 ${accSkipped}점만 인식됐어요. 액세서리는 등록 대상이 아니에요.`
                   : "옷이 잘 보이는 사진으로 다시 시도해 보세요."}
               </p>
               <div className="modal-actions">
@@ -437,6 +453,7 @@ export function WardrobeScanModal({ open, onClose, onAdded }: Props) {
                     : "인식이 어려워 초안을 만들었어요"}{" "}
                   · <b>{checkedCount}</b>점 선택됨
                   {skipped > 0 && ` · ${skipped}장 건너뜀`}
+                  {accSkipped > 0 && ` · 액세서리 ${accSkipped}점 제외`}
                 </span>
                 <button
                   className="text-link"

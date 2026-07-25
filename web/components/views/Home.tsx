@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import gsap from "gsap";
 import { useApp } from "../app-context";
 import { Icon } from "../Sprite";
 import { BodyStyleModal } from "../BodyStyleModal";
+import { OutfitMannequin, type MannequinGender } from "../OutfitMannequin";
+import { careNote } from "@/lib/data";
 
 interface Outfit {
   rank: string;
@@ -25,11 +26,11 @@ const OUTFITS: Outfit[] = [
   {
     rank: "BEST MATCH 01",
     pill: "51일 만에 다시 만난 니트",
-    title: "비 오는 날의 차분한 네이비",
-    desc: "생활 방수가 되는 트렌치에 여름 쿨톤과 잘 맞는 네이비 니트를 조합했어요. 저녁 기온이 내려가도 편안해요.",
+    title: "비 오는 날의 차분한 뉴트럴",
+    desc: "생활 방수가 되는 트렌치에 여름 쿨톤과 잘 맞는 그레이 니트를 조합했어요. 저녁 기온이 내려가도 편안해요.",
     lens: [["96", "날씨"], ["92", "TPO"], ["91", "컬러"], ["88", "핏"]],
     rack: { coat: "/items/coat.jpg", top: "/items/knit.jpg", pants: "/items/pants.jpg", shoe: "/items/shoe.jpg" },
-    alt: { coat: "베이지 트렌치코트", top: "네이비 울 니트", pants: "크림 와이드 팬츠", shoe: "스웨이드 로퍼" },
+    alt: { coat: "베이지 트렌치코트", top: "그레이 울 니트", pants: "크림 와이드 팬츠", shoe: "스웨이드 로퍼" },
     tpoLabel: "출근·미팅",
     tpoIcon: "💼",
     ctxTitle: "오후 2시 · 고객 미팅",
@@ -107,23 +108,66 @@ function describeWeather(code: number): { label: string; icon: string } {
 // 홈 재방문마다 재요청하지 않도록 세션 캐시(10분)
 let weatherCache: { data: Weather; at: number } | null = null;
 
+// 오늘 날짜 키(로컬 타임존) — 착장 중복 기록 방지용
+const todayKey = () => new Date().toLocaleDateString("en-CA");
+const WORN_KEY = "closet.wornLog";
+
+// 날씨 → 어울리는 기본 코디 인덱스(사용자가 손대기 전까지만 적용)
+function outfitForWeather(w: Weather): number {
+  if (w.precip >= 50) return 0; // 비 — 생활 방수 트렌치
+  if (w.apparent >= 27) return 1; // 더움 — 가장 가벼운 데님 캐주얼
+  if (w.apparent >= 18) return 3; // 온화 — 데일리 레이어드
+  return 2; // 쌀쌀 — 포근한 니트 무드
+}
+
 export function HomeView() {
-  const { toast, switchView } = useApp();
-  const [wearLabel, setWearLabel] = useState("오늘 입을게요");
-  const [worn, setWorn] = useState(false);
+  const { toast, switchView, items, wearOutfit } = useApp();
   const [saved, setSaved] = useState(false);
   const [outfitIdx, setOutfitIdx] = useState(0);
   const [tpoOpen, setTpoOpen] = useState(false);
   const [styleOpen, setStyleOpen] = useState(false);
   const [weather, setWeather] = useState<Weather>(FALLBACK_WEATHER);
+  // 오늘 이미 착용 기록한 코디(새로고침에도 유지 → 같은 코디 중복 기록 방지)
+  const [wornLog, setWornLog] = useState<number[]>(() => {
+    try {
+      const raw = localStorage.getItem(WORN_KEY);
+      const parsed = raw ? (JSON.parse(raw) as { date: string; outfits: number[] }) : null;
+      return parsed && parsed.date === todayKey() && Array.isArray(parsed.outfits)
+        ? parsed.outfits
+        : [];
+    } catch {
+      return [];
+    }
+  });
+  // 마네킹 체형(여성/남성) — 기기별 저장
+  const [gender, setGender] = useState<MannequinGender>(() => {
+    try {
+      return localStorage.getItem("closet.mannequin") === "male" ? "male" : "female";
+    } catch {
+      return "female";
+    }
+  });
   const outfit = OUTFITS[outfitIdx];
-  const rackRef = useRef<HTMLDivElement>(null);
-  const prevOutfit = useRef(outfitIdx);
+  const worn = wornLog.includes(outfitIdx);
+  const touched = useRef(false); // 사용자가 코디를 직접 고르면 날씨 자동 선택을 멈춘다
 
-  // 세종시 실시간 날씨 로드 (실패 시 FALLBACK 유지, 10분 캐시)
+  const pickGender = (g: MannequinGender) => {
+    setGender(g);
+    try {
+      localStorage.setItem("closet.mannequin", g);
+    } catch {
+      /* 비필수 */
+    }
+  };
+
+  // 세종시 실시간 날씨 로드 (실패 시 FALLBACK 유지, 10분 캐시) + 날씨 맞춤 기본 코디
   useEffect(() => {
+    const apply = (w: Weather) => {
+      setWeather(w);
+      if (!touched.current) setOutfitIdx(outfitForWeather(w));
+    };
     if (weatherCache && Date.now() - weatherCache.at < 600000) {
-      setWeather(weatherCache.data);
+      apply(weatherCache.data);
       return;
     }
     const ctrl = new AbortController();
@@ -148,7 +192,7 @@ export function HomeView() {
           label: wx.label,
           icon: wx.icon,
         };
-        setWeather(w);
+        apply(w);
         weatherCache = { data: w, at: Date.now() };
       } catch {
         /* keep fallback */
@@ -157,44 +201,77 @@ export function HomeView() {
     return () => ctrl.abort();
   }, []);
 
-  // 조합이 실제로 바뀔 때만 랙 재진입 애니메이션(마운트·StrictMode 재실행엔 반응 안 함)
-  useEffect(() => {
-    if (prevOutfit.current === outfitIdx) return;
-    prevOutfit.current = outfitIdx;
-    const reduce =
-      typeof window !== "undefined" &&
-      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if (reduce || !rackRef.current) return;
-    const items = rackRef.current.querySelectorAll(".rack-item");
-    gsap.fromTo(
-      items,
-      { opacity: 0, scale: 0.92, y: 10 },
-      { opacity: 1, scale: 1, y: 0, stagger: 0.07, duration: 0.4, ease: "back.out(1.4)" }
-    );
-  }, [outfitIdx]);
+  // 조합/체형 변경 시 마네킹 착장 등장 애니메이션은 OutfitMannequin의 CSS 스태거가
+  // key 리마운트로 재생된다(reduced-motion은 CSS 미디어 쿼리에서 존중).
 
   const nextOutfit = () => {
+    touched.current = true;
     setOutfitIdx((i) => (i + 1) % OUTFITS.length);
-    setWorn(false);
-    setWearLabel("오늘 입을게요");
     setSaved(false);
     toast("다른 조합을 찾았어요");
   };
 
   const selectTpo = (i: number) => {
+    touched.current = true;
     setOutfitIdx(i);
-    setWorn(false);
-    setWearLabel("오늘 입을게요");
     setSaved(false);
     toast(`${OUTFITS[i].tpoLabel} 상황에 맞춰 추천했어요`);
   };
+
+  // '오늘 입을게요' → 착장 구성 옷을 실제로 착용 처리(착용 +1 · 오늘) + 케어(세탁 대기열) 등록.
+  // 같은 날 같은 코디는 중복 기록되지 않는다(wornLog, 새로고침에도 유지).
+  const wearToday = () => {
+    if (worn) return;
+    touched.current = true;
+    const rackImgs = Object.values(outfit.rack);
+    const matched = items.filter((x) => rackImgs.includes(x.img));
+    wearOutfit(rackImgs);
+    const nextLog = [...wornLog, outfitIdx];
+    setWornLog(nextLog);
+    try {
+      localStorage.setItem(WORN_KEY, JSON.stringify({ date: todayKey(), outfits: nextLog }));
+    } catch {
+      /* 저장 실패 시 세션 내 가드만 유지 */
+    }
+    toast(
+      matched.length > 0
+        ? `오늘 입은 ${matched.length}벌을 케어 대기열에 담았어요`
+        : "오늘의 착장으로 선택했어요",
+      matched.length > 0
+        ? { label: "케어 보기", onAction: () => switchView("care") }
+        : undefined
+    );
+  };
+
+  // 케어 카드 — 옷장 실데이터(세탁 필요 상태)와 연동
+  const careQueue = items.filter((x) => x.state === "laundry");
+  const careTop = careQueue[0];
+
+  // 이 코디에 세탁 대기 중인 옷이 섞여 있으면 미리 알려준다(입기 전에만)
+  const rackImgs = Object.values(outfit.rack);
+  const laundryInOutfit = worn
+    ? 0
+    : items.filter((x) => rackImgs.includes(x.img) && x.state === "laundry").length;
+
+  // 상단 날짜·인사 — 하드코딩 대신 실제 시각(로그인 후 클라이언트에서만 렌더되므로 안전)
+  const now = new Date();
+  const eyebrow = `${now.toLocaleDateString("en-US", { weekday: "long" })} · ${now.toLocaleDateString("en-US", { month: "long", day: "numeric" })}`;
+  const hour = now.getHours();
+  const greeting =
+    hour >= 5 && hour < 11
+      ? "좋은 아침이에요, 하늘님."
+      : hour >= 11 && hour < 17
+      ? "좋은 오후예요, 하늘님."
+      : hour >= 17 && hour < 22
+      ? "좋은 저녁이에요, 하늘님."
+      : "늦은 밤이에요, 하늘님.";
 
   return (
     <section className="view active" id="view-home">
       <div className="page-head">
         <div>
-          <div className="eyebrow">Tuesday · July 21</div>
-          <h1>좋은 아침이에요, 하늘님.</h1>
+          <div className="eyebrow">{eyebrow}</div>
+          <h1>{greeting}</h1>
           <p>세종시 날씨와 오늘 일정에 맞춘 조합을 준비했어요.</p>
         </div>
         <div className="head-actions">
@@ -261,21 +338,37 @@ export function HomeView() {
         <article className="card hero-outfit">
           <div className="outfit-stage">
             <div className="stage-pill">{outfit.pill}</div>
-            <div className="rack" ref={rackRef}>
-              <div className="rack-item coat-slot">
-                <img src={outfit.rack.coat} alt={outfit.alt.coat} />
-              </div>
-              <div className="rack-col">
-                <div className="rack-item top-slot">
-                  <img src={outfit.rack.top} alt={outfit.alt.top} />
+            <div className="gender-toggle" role="group" aria-label="마네킹 체형 선택">
+              <button
+                className={gender === "female" ? "active" : ""}
+                aria-pressed={gender === "female"}
+                onClick={() => pickGender("female")}
+              >
+                여성
+              </button>
+              <button
+                className={gender === "male" ? "active" : ""}
+                aria-pressed={gender === "male"}
+                onClick={() => pickGender("male")}
+              >
+                남성
+              </button>
+            </div>
+            <div className="rack mannequin-rack">
+              {/* key 리마운트로 조합·체형 변경 시 착장 등장 스태거가 재생된다 */}
+              <OutfitMannequin
+                key={`${outfitIdx}-${gender}`}
+                rack={outfit.rack}
+                alt={outfit.alt}
+                gender={gender}
+              />
+            </div>
+            <div className="stage-items" aria-hidden="true">
+              {(["coat", "top", "pants", "shoe"] as const).map((k) => (
+                <div className="stage-chip" key={k} title={outfit.alt[k]}>
+                  <img src={outfit.rack[k]} alt="" />
                 </div>
-                <div className="rack-item pants-slot">
-                  <img src={outfit.rack.pants} alt={outfit.alt.pants} />
-                </div>
-              </div>
-              <div className="rack-item shoe-slot">
-                <img src={outfit.rack.shoe} alt={outfit.alt.shoe} />
-              </div>
+              ))}
             </div>
           </div>
           <div className="outfit-info">
@@ -294,13 +387,10 @@ export function HomeView() {
               <button
                 className="btn primary"
                 style={worn ? { background: "#173e34" } : undefined}
-                onClick={() => {
-                  setWorn(true);
-                  setWearLabel("착용 예정으로 선택됨");
-                  toast("오늘의 착장으로 선택했어요. 저녁에 착용을 확인할게요.");
-                }}
+                disabled={worn}
+                onClick={wearToday}
               >
-                {wearLabel}
+                {worn ? "오늘 착용으로 기록됨" : "오늘 입을게요"}
               </button>
               <button
                 className="icon-btn"
@@ -314,6 +404,12 @@ export function HomeView() {
                 {saved ? "♥" : "♡"}
               </button>
             </div>
+            {laundryInOutfit > 0 && (
+              <p className="outfit-warn">
+                이 조합에는 세탁 대기 중인 옷 {laundryInOutfit}벌이 있어요 — 케어를 마치거나 다른
+                조합을 살펴보세요.
+              </p>
+            )}
           </div>
         </article>
         <div className="side-stack">
@@ -348,18 +444,33 @@ export function HomeView() {
           <article className="card care-card">
             <div className="section-title">
               <h2>케어가 필요해요</h2>
-              <span>3벌</span>
+              <span>{careQueue.length}벌</span>
             </div>
-            <div className="care-line">
-              <div className="care-ico">≈</div>
-              <div>
-                <b>네이비 울 니트</b>
-                <span>3회 착용 · 찬물 손세탁</span>
+            {careTop ? (
+              <div className="care-line">
+                <div className="care-ico">≈</div>
+                <div>
+                  <b>{careTop.name}</b>
+                  <span>
+                    {careTop.wear} 착용 · {careNote(careTop.name)}
+                  </span>
+                </div>
+                <button className="btn" onClick={() => switchView("care")}>
+                  확인
+                </button>
               </div>
-              <button className="btn" onClick={() => switchView("care")}>
-                확인
-              </button>
-            </div>
+            ) : (
+              <div className="care-line">
+                <div className="care-ico">✓</div>
+                <div>
+                  <b>모든 옷이 준비됐어요</b>
+                  <span>세탁 대기 중인 옷이 없어요</span>
+                </div>
+                <button className="btn" onClick={() => switchView("care")}>
+                  케어 열기
+                </button>
+              </div>
+            )}
           </article>
         </div>
       </div>
