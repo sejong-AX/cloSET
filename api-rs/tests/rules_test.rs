@@ -182,3 +182,82 @@ fn wool_guide_defaults() {
     assert_eq!(c.symbols.len(), 4);
     assert!(c.base_guide.contains("손세탁") || c.base_guide.contains("찬물"));
 }
+
+// ---- 의류 카테고리 결정적 재판정 (접혀 걸린 바지 오분류 회귀 테스트) ----
+
+use closet_api_rs::rules::{box_iou, resolve_garment_category};
+
+/// 핵심 회귀: 비전이 '상의'라고 답해도 이름에 바지 명사가 있으면 '하의'로 교정된다.
+/// (옷걸이 바에 반으로 접힌 바지가 가로로 넓어 상의로 오인되던 실제 결함)
+#[test]
+fn folded_pants_misread_as_top_is_corrected() {
+    for name in ["검정 슬랙스", "접힌 검정 바지", "연청 청바지", "회색 트레이닝 바지", "블랙 조거 팬츠"] {
+        assert_eq!(resolve_garment_category(name, "상의"), "하의", "name={name}");
+    }
+}
+
+#[test]
+fn skirt_and_shorts_are_bottom() {
+    assert_eq!(resolve_garment_category("플리츠 스커트", "상의"), "하의");
+    assert_eq!(resolve_garment_category("데님 반바지", "니트"), "하의");
+}
+
+/// 이름에 상의 명사가 있으면 하의로 잘못 준 카테고리도 교정된다(역방향)
+#[test]
+fn shirt_misread_as_bottom_is_corrected() {
+    assert_eq!(resolve_garment_category("화이트 코튼 셔츠", "하의"), "상의");
+    assert_eq!(resolve_garment_category("회색 후드티", "하의"), "상의");
+}
+
+/// '데님 자켓'처럼 하의 수식어가 붙은 아우터를 하의로 끌어가지 않는다
+#[test]
+fn denim_jacket_stays_outer() {
+    assert_eq!(resolve_garment_category("인디고 데님 자켓", "상의"), "아우터");
+    assert_eq!(resolve_garment_category("카고 재킷", ""), "아우터");
+    assert_eq!(resolve_garment_category("트렌치코트", "상의"), "아우터");
+}
+
+#[test]
+fn cardigan_is_knit_not_outer() {
+    assert_eq!(resolve_garment_category("아이보리 케이블 가디건", ""), "니트");
+    assert_eq!(resolve_garment_category("그레이 울 니트", "상의"), "니트");
+}
+
+#[test]
+fn shoes_bags_accessories_are_classified() {
+    assert_eq!(resolve_garment_category("스웨이드 로퍼", "상의"), "신발");
+    assert_eq!(resolve_garment_category("블랙 백팩", "상의"), "가방");
+    assert_eq!(resolve_garment_category("검정 볼캡", "상의"), "액세서리");
+    assert_eq!(resolve_garment_category("네이비 원피스", "상의"), "원피스");
+}
+
+/// 이름에 단서가 없으면 모델 카테고리를 그대로 쓴다
+#[test]
+fn falls_back_to_model_category() {
+    assert_eq!(resolve_garment_category("무언가", "하의"), "하의");
+    assert_eq!(resolve_garment_category("무언가", "패딩"), "아우터");
+    assert_eq!(resolve_garment_category("무언가", ""), "상의");
+}
+
+/// 공백·대소문자 차이를 무시한다
+#[test]
+fn normalizes_spacing_and_case() {
+    assert_eq!(resolve_garment_category("BLACK SLACKS", "상의"), "하의");
+    assert_eq!(resolve_garment_category("데님 팬 츠", "상의"), "하의");
+}
+
+// ---- 겹쳐 걸린 옷 이중 검출 제거용 IoU ----
+
+#[test]
+fn iou_detects_same_region() {
+    assert!(box_iou((10.0, 10.0, 20.0, 40.0), (10.0, 10.0, 20.0, 40.0)) > 0.99);
+    assert!(box_iou((10.0, 10.0, 20.0, 40.0), (11.0, 11.0, 20.0, 40.0)) > 0.7);
+}
+
+#[test]
+fn iou_keeps_neighbouring_garments_apart() {
+    // 행거에 나란히 걸린 두 벌 — 살짝 겹쳐도 별개로 남아야 한다
+    assert!(box_iou((10.0, 10.0, 20.0, 40.0), (28.0, 10.0, 20.0, 40.0)) < 0.7);
+    assert_eq!(box_iou((0.0, 0.0, 10.0, 10.0), (50.0, 50.0, 10.0, 10.0)), 0.0);
+    assert_eq!(box_iou((0.0, 0.0, 0.0, 0.0), (0.0, 0.0, 10.0, 10.0)), 0.0);
+}
