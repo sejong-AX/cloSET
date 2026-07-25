@@ -70,20 +70,21 @@ function armPath(x1: number, y1: number, x2: number, y2: number, r: number): str
   )},${f(y2 - ny)} A${r},${r} 0 0 1 ${f(x2 + nx)},${f(y2 + ny)} Z`;
 }
 
-/** 의류 레이어 배치 상자 — 실제 옷 컷아웃(PNG)이 이 상자 안에 비율 유지로 놓인다 */
-function slotBoxes(scale: number) {
-  const w = (n: number) => n * scale;
+/** 의류 레이어 배치 상자 — 실제 옷 컷아웃(PNG)이 이 상자 안에 비율 유지로 놓인다.
+ *  주의: 내부 클로저로 배율을 곱하는 형태는 SWC 미니파이어 인라이닝 버그로
+ *  프로덕션에서 미해결 식별자를 만들 수 있어(2026-07-25 실배포 사고) 평문 곱셈만 쓴다. */
+function slotBoxes(k: number) {
   return {
-    coat: { x: C - w(88), y: 74, w: w(176), h: 268, align: "xMidYMin" },
-    pants: { x: C - w(47), y: 198, w: w(94), h: 246, align: "xMidYMin" },
-    top: { x: C - w(55), y: 92, w: w(110), h: 148, align: "xMidYMin" },
-    shoe: { x: C - w(52), y: 398, w: w(104), h: 58, align: "xMidYMax" },
+    coat: { x: C - 88 * k, y: 74, w: 176 * k, h: 268, align: "xMidYMin" },
+    pants: { x: C - 47 * k, y: 198, w: 94 * k, h: 246, align: "xMidYMin" },
+    top: { x: C - 55 * k, y: 92, w: 110 * k, h: 148, align: "xMidYMin" },
+    shoe: { x: C - 52 * k, y: 398, w: 104 * k, h: 58, align: "xMidYMax" },
   } as const;
 }
 
 export function OutfitMannequin({ rack, alt, gender }: Props) {
-  const { sh, chest, waist, hip, scale } = DIMS[gender];
-  const boxes = slotBoxes(scale);
+  const { sh, chest, waist, hip, scale: widthScale } = DIMS[gender];
+  const boxes = slotBoxes(widthScale);
   // 레이어 순서: 아우터(맨 뒤) → 하의 → 상의 → 신발. 상의가 코트 앞판·바지 허리를 덮는다.
   const layers = [
     { key: "coat", src: flatSrc(rack.coat), box: boxes.coat },
