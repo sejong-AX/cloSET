@@ -13,6 +13,8 @@ import {
   type TrashEntry,
   type ViewName,
 } from "@/lib/data";
+import type { Gender } from "@/lib/garment";
+import { pruneLog, type OutfitLogEntry } from "@/lib/outfit";
 import { playViewEntrance, prefersReduced } from "@/lib/anim";
 import { HomeView } from "./views/Home";
 import { ClosetView } from "./views/Closet";
@@ -54,11 +56,41 @@ interface Notif {
   time: string;
   view: ViewName;
 }
-const NOTIFS: Notif[] = [
-  { icon: "🧺", title: "그레이 울 니트가 세탁 임계(3회)에 도달했어요", time: "2시간 전", view: "care" },
-  { icon: "♻️", title: "브라운 울 코트를 126일째 안 입었어요 — 순환을 제안해요", time: "어제", view: "reuse" },
-  { icon: "🌤️", title: "오늘 세종시 날씨에 맞춰 추천 조합을 갱신했어요", time: "오전 8:10", view: "home" },
-];
+
+/**
+ * 알림은 실제 옷장에서 파생한다 — 옷장을 비우거나 새로 채우면 알림도 같이 바뀐다.
+ * (하드코딩된 예시 알림이 남아 있으면 내 옷장과 어긋난다)
+ */
+function buildNotifs(items: Item[]): Notif[] {
+  const out: Notif[] = [];
+  const laundry = items.filter((x) => x.state === "laundry");
+  if (laundry.length > 0) {
+    const top = laundry.reduce((a, b) => (wearCount(b.wear) > wearCount(a.wear) ? b : a));
+    out.push({
+      icon: "🧺",
+      title: `${top.name}가 세탁 임계에 도달했어요`,
+      time: `${top.wear} 착용`,
+      view: "care",
+    });
+  }
+  const forgotten = items.filter((x) => x.daysAgo >= 60);
+  if (forgotten.length > 0) {
+    const top = forgotten.reduce((a, b) => (b.daysAgo > a.daysAgo ? b : a));
+    out.push({
+      icon: "♻️",
+      title: `${top.name}를 ${top.daysAgo}일째 안 입었어요 — 순환을 제안해요`,
+      time: `마지막 착용 ${top.daysAgo}일 전`,
+      view: "reuse",
+    });
+  }
+  out.push({
+    icon: "🌤️",
+    title: "오늘 세종시 날씨에 맞춰 추천 조합을 갱신했어요",
+    time: "방금",
+    view: "home",
+  });
+  return out;
+}
 
 interface ToastAction {
   label: string;
@@ -72,6 +104,9 @@ interface AppShellProps {
 const ITEMS_KEY = "closet.items";
 const FAVS_KEY = "closet.favorites";
 const TRASH_KEY = "closet.trash";
+const LOG_KEY = "closet.outfitLog";
+const GENDER_KEY = "closet.mannequin";
+const LOG_MAX = 60;
 const TRASH_MAX = 20; // 사진 data URL 누적으로 저장소가 넘치지 않도록 상한
 
 export function AppShell({ toast, onLogout }: AppShellProps) {
@@ -82,6 +117,9 @@ export function AppShell({ toast, onLogout }: AppShellProps) {
   const [reduced] = useState<boolean>(() => prefersReduced());
   const [items, setItems] = useState<Item[]>(initialItems);
   const [trash, setTrash] = useState<TrashEntry[]>([]);
+  // 착장 기록 — '지난주 그 조합'과 '오늘 이미 입은 조합' 판단의 단일 출처
+  const [outfitLog, setOutfitLog] = useState<OutfitLogEntry[]>([]);
+  const [gender, setGender] = useState<Gender>("female");
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
   const [notifOpen, setNotifOpen] = useState(false);
   // 알림별 읽음 상태 — 항목을 열거나 '모두 읽음'을 눌러야 읽음 처리된다(패널 열림만으로는 아님)
@@ -96,13 +134,19 @@ export function AppShell({ toast, onLogout }: AppShellProps) {
     try {
       const rawI = localStorage.getItem(ITEMS_KEY);
       const parsedI = rawI ? JSON.parse(rawI) : null;
-      if (Array.isArray(parsedI) && parsedI.length) setItems(parsedI as Item[]);
+      // 빈 배열도 존중한다 — 옷장을 완전히 비운 상태에서 새로고침하면
+      // 시드 샘플 옷 23점이 되살아나던 문제(내 옷장을 비운 뒤 다시 채우는 흐름을 깨뜨림)
+      if (Array.isArray(parsedI)) setItems(parsedI as Item[]);
       const rawF = localStorage.getItem(FAVS_KEY);
       const parsedF = rawF ? JSON.parse(rawF) : null;
       if (Array.isArray(parsedF)) setFavorites(new Set(parsedF as string[]));
       const rawT = localStorage.getItem(TRASH_KEY);
       const parsedT = rawT ? JSON.parse(rawT) : null;
       if (Array.isArray(parsedT)) setTrash(parsedT as TrashEntry[]);
+      const rawL = localStorage.getItem(LOG_KEY);
+      const parsedL = rawL ? JSON.parse(rawL) : null;
+      if (Array.isArray(parsedL)) setOutfitLog(parsedL as OutfitLogEntry[]);
+      if (localStorage.getItem(GENDER_KEY) === "male") setGender("male");
     } catch {
       /* 손상된 저장소 무시 */
     }
@@ -116,6 +160,7 @@ export function AppShell({ toast, onLogout }: AppShellProps) {
       localStorage.setItem(ITEMS_KEY, JSON.stringify(items));
       localStorage.setItem(FAVS_KEY, JSON.stringify([...favorites]));
       localStorage.setItem(TRASH_KEY, JSON.stringify(trash));
+      localStorage.setItem(LOG_KEY, JSON.stringify(outfitLog));
     } catch {
       // 용량 초과 등 저장 실패 — 사일런트 방지로 1회 안내(사진 일괄 등록 시 썸네일 누적)
       if (!quotaWarned.current) {
@@ -123,7 +168,38 @@ export function AppShell({ toast, onLogout }: AppShellProps) {
         toast("옷장 저장 공간이 가득 찼어요. 최근 변경은 이번 세션에만 유지돼요.");
       }
     }
-  }, [items, favorites, trash, hydrated, toast]);
+  }, [items, favorites, trash, outfitLog, hydrated, toast]);
+
+  // 옷장에서 사라진 옷이 섞인 기록은 정리한다 → 옷장을 비우면 '지난주 그 조합'도 함께 초기화된다
+  useEffect(() => {
+    if (!hydrated) return;
+    setOutfitLog((prev) => {
+      const next = pruneLog(prev, items);
+      return next.length === prev.length ? prev : next;
+    });
+  }, [items, hydrated]);
+
+  const pickGender = useCallback((g: Gender) => {
+    setGender(g);
+    try {
+      localStorage.setItem(GENDER_KEY, g);
+    } catch {
+      /* 비필수 */
+    }
+  }, []);
+
+  const logOutfit = useCallback((entry: OutfitLogEntry) => {
+    setOutfitLog((prev) => [entry, ...prev.filter((e) => !(e.sig === entry.sig && e.at === entry.at))].slice(0, LOG_MAX));
+  }, []);
+
+  const clearHistory = useCallback(() => {
+    setOutfitLog([]);
+    try {
+      localStorage.removeItem(LOG_KEY);
+    } catch {
+      /* 비필수 */
+    }
+  }, []);
 
   const addClothing = useCallback((item: Omit<Item, "id">) => {
     idCounter.current += 1;
@@ -170,11 +246,13 @@ export function AppShell({ toast, onLogout }: AppShellProps) {
     setTrash((prev) => (id === undefined ? [] : prev.filter((e) => e.item.id !== id)));
   }, []);
 
-  // '오늘 입을게요' — 착장에 포함된 옷(사진 경로 매칭)을 착용 +1, 오늘 착용, 세탁 대기열로.
-  const wearOutfit = useCallback((imgs: string[]) => {
+  // '오늘 입을게요' — 착장에 포함된 옷을 id 로 찾아 착용 +1, 오늘 착용, 세탁 대기열로.
+  // (사진 경로로 찾으면 같은 썸네일을 공유하는 옷이 함께 딸려온다)
+  const wearItems = useCallback((ids: string[]) => {
+    const set = new Set(ids);
     setItems((prev) =>
       prev.map((x) =>
-        imgs.includes(x.img)
+        set.has(x.id)
           ? {
               ...x,
               wear: `${wearCount(x.wear) + 1}회`,
@@ -184,6 +262,13 @@ export function AppShell({ toast, onLogout }: AppShellProps) {
             }
           : x
       )
+    );
+  }, []);
+
+  // 옷 상세에서 '오늘 입었어요' — 착용만 +1 하고 상태는 사용자가 직접 고른다
+  const bumpWear = useCallback((id: string) => {
+    setItems((prev) =>
+      prev.map((x) => (x.id === id ? { ...x, wear: `${wearCount(x.wear) + 1}회`, daysAgo: 0 } : x))
     );
   }, []);
 
@@ -237,7 +322,8 @@ export function AppShell({ toast, onLogout }: AppShellProps) {
     return () => window.removeEventListener("keydown", onKey);
   }, [notifOpen]);
 
-  const unreadCount = NOTIFS.length - notifRead.size;
+  const notifs = useMemo(() => buildNotifs(items), [items]);
+  const unreadCount = Math.max(0, notifs.length - notifRead.size);
   const markNotifRead = (i: number) =>
     setNotifRead((prev) => {
       if (prev.has(i)) return prev;
@@ -265,12 +351,18 @@ export function AppShell({ toast, onLogout }: AppShellProps) {
       removeClothing,
       restoreClothing,
       setClothingState,
-      wearOutfit,
+      wearItems,
+      bumpWear,
       trash,
       restoreFromTrash,
       purgeTrash,
       favorites,
       toggleFavorite,
+      gender,
+      setGender: pickGender,
+      outfitLog,
+      logOutfit,
+      clearHistory,
     }),
     [
       view,
@@ -284,12 +376,18 @@ export function AppShell({ toast, onLogout }: AppShellProps) {
       removeClothing,
       restoreClothing,
       setClothingState,
-      wearOutfit,
+      wearItems,
+      bumpWear,
       trash,
       restoreFromTrash,
       purgeTrash,
       favorites,
       toggleFavorite,
+      gender,
+      pickGender,
+      outfitLog,
+      logOutfit,
+      clearHistory,
     ]
   );
 
@@ -406,7 +504,7 @@ export function AppShell({ toast, onLogout }: AppShellProps) {
                         {unreadCount > 0 ? `안 읽음 ${unreadCount}건` : "모두 읽음"}
                       </span>
                     </div>
-                    {NOTIFS.map((n, i) => (
+                    {notifs.map((n, i) => (
                       <button
                         className={"notif-item" + (notifRead.has(i) ? " read" : "")}
                         key={i}
@@ -428,7 +526,7 @@ export function AppShell({ toast, onLogout }: AppShellProps) {
                     <button
                       className="notif-all"
                       onClick={() => {
-                        setNotifRead(new Set(NOTIFS.map((_, i) => i)));
+                        setNotifRead(new Set(notifs.map((_, i) => i)));
                         setNotifOpen(false);
                         toast("알림을 모두 읽음으로 표시했어요");
                       }}

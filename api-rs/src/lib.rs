@@ -198,17 +198,80 @@ pub async fn style_response(payload: &Value, authorized: bool) -> Value {
     openai::style_fallback(&body_type)
 }
 
+/// 한 장에서 인식한 아이템 상한 — 옷장 전체 사진 한 장에 24벌까지 담길 수 있다
+const MAX_WARDROBE_ITEMS: usize = 24;
+/// 같은 옷을 두 번 잡았다고 볼 영역 겹침 기준
+const DEDUPE_IOU: f64 = 0.7;
+
+fn read_box(item: &Value) -> Option<(f64, f64, f64, f64)> {
+    let b = item.get("box")?;
+    let g = |k: &str| b.get(k).and_then(|v| v.as_f64());
+    Some((g("x")?, g("y")?, g("w")?, g("h")?))
+}
+
+/// 비전 결과를 결정적으로 정리한다.
+/// 1) 이름의 확정 명사로 카테고리 재판정 (접혀 걸린 바지를 '상의'로 준 경우 교정)
+/// 2) box 를 사진 안으로 클램프하고 너무 작은 영역은 버린다
+/// 3) 같은 영역을 두 번 잡은 중복 제거 (겹쳐 걸린 옷의 이중 검출)
+/// 4) 개수 상한
+fn normalize_wardrobe_items(items: &[Value]) -> Vec<Value> {
+    let mut out: Vec<Value> = Vec::new();
+    let mut boxes: Vec<(f64, f64, f64, f64)> = Vec::new();
+    for it in items {
+        let name = cap(it.get("name").and_then(|v| v.as_str()).unwrap_or("").trim(), 40);
+        if name.is_empty() {
+            continue;
+        }
+        let raw_cat = it.get("category").and_then(|v| v.as_str()).unwrap_or("");
+        let category = rules::resolve_garment_category(&name, raw_cat);
+        let mut item = json!({
+            "name": name,
+            "category": category,
+            "color": cap(it.get("color").and_then(|v| v.as_str()).unwrap_or(""), 20),
+            "material": cap(it.get("material").and_then(|v| v.as_str()).unwrap_or(""), 30),
+            "fit": cap(it.get("fit").and_then(|v| v.as_str()).unwrap_or(""), 12),
+            "folded": it.get("folded").and_then(|v| v.as_bool()).unwrap_or(false),
+        });
+        if raw_cat.trim() != item["category"].as_str().unwrap_or("") {
+            // 어떤 판정이 교정됐는지 클라이언트가 사용자에게 알릴 수 있게 남긴다
+            item["categoryFrom"] = json!(cap(raw_cat, 20));
+        }
+        if let Some((x, y, w, h)) = read_box(it) {
+            let x = x.clamp(0.0, 100.0);
+            let y = y.clamp(0.0, 100.0);
+            let w = w.clamp(0.0, 100.0 - x);
+            let h = h.clamp(0.0, 100.0 - y);
+            // 사진의 2% 미만 영역은 옷으로 쓰기 어렵다 → box 없이 통과(원본 축소본을 썸네일로 쓴다)
+            if w >= 2.0 && h >= 2.0 {
+                let b = (x, y, w, h);
+                if boxes.iter().any(|prev| rules::box_iou(*prev, b) >= DEDUPE_IOU) {
+                    continue; // 같은 옷을 두 번 잡았다
+                }
+                boxes.push(b);
+                item["box"] = json!({"x": x, "y": y, "w": w, "h": h});
+            }
+        }
+        out.push(item);
+        if out.len() >= MAX_WARDROBE_ITEMS {
+            break;
+        }
+    }
+    out
+}
+
 /// POST /api/wardrobe 응답. payload: { image?: data-url }
-/// 사진(옷장·갤러리) 속 의류 아이템을 GPT-4o 비전으로 식별, 실패 시 편집용 초안 1점.
+/// 사진(옷장·갤러리) 속 의류 아이템을 비전으로 식별하고 결정적으로 정리한다. 실패 시 편집용 초안 1점.
 pub async fn wardrobe_response(payload: &Value, authorized: bool) -> Value {
     if authorized {
         if let Some(img) = payload.get("image").and_then(|v| v.as_str()) {
             if img.starts_with("data:image") && img.len() < MAX_IMAGE_BYTES {
                 if let Some(v) = openai::wardrobe_detect(img).await {
-                    let mut out = v;
-                    out["source"] = json!("openai");
-                    out["model"] = json!(openai::model_name());
-                    return out;
+                    let raw = v.get("items").and_then(|x| x.as_array()).cloned().unwrap_or_default();
+                    return json!({
+                        "items": normalize_wardrobe_items(&raw),
+                        "source": "openai",
+                        "model": openai::model_name(),
+                    });
                 }
             }
         }

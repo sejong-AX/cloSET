@@ -4,7 +4,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useApp } from "../app-context";
 import { Icon } from "../Sprite";
 import { WardrobeScanModal } from "../WardrobeScanModal";
+import { ItemDetailModal } from "../ItemDetailModal";
 import { objectParticle, type ClothState, type Item } from "@/lib/data";
+import { resolveCategory } from "@/lib/garment";
+import { garmentArtDataUrl, resolveColor } from "@/lib/garment-art";
+import { matchGarmentPhoto } from "@/lib/garment-catalog";
 
 const FILTER_DEFS: { key: string; name: string }[] = [
   { key: "all", name: "전체" },
@@ -15,12 +19,12 @@ const FILTER_DEFS: { key: string; name: string }[] = [
   { key: "favorite", name: "즐겨찾기" },
 ];
 
-// 새 옷 등록 시 카테고리별 기본 사진·표기
-const CATEGORY_META: Record<string, { type: string; img: string; bg: string; color: string }> = {
-  상의: { type: "top-g", img: "/items/shirt-white.jpg", bg: "#eef0ec", color: "#e7e5dc" },
-  하의: { type: "pants", img: "/items/pants.jpg", bg: "#e2e7ec", color: "#6b83a0" },
-  아우터: { type: "coat", img: "/items/cardigan-ivory.jpg", bg: "#efe9de", color: "#e3d8c2" },
-  신발: { type: "shoe", img: "/items/shoe.jpg", bg: "#eee5da", color: "#765c48" },
+// 새 옷 등록 시 카테고리별 표기(이미지는 이름·색으로 그때그때 고른다)
+const CATEGORY_META: Record<string, { type: string; bg: string }> = {
+  상의: { type: "top-g", bg: "#eef0ec" },
+  하의: { type: "pants", bg: "#e2e7ec" },
+  아우터: { type: "coat", bg: "#efe9de" },
+  신발: { type: "shoe", bg: "#eee5da" },
 };
 
 const parsePrice = (s: string) => {
@@ -46,6 +50,10 @@ export function ClosetView() {
     purgeTrash,
     favorites,
     toggleFavorite,
+    wearItems,
+    logOutfit,
+    gender,
+    switchView,
   } = useApp();
   const [filter, setFilter] = useState<string>("all");
   const [search, setSearch] = useState("");
@@ -53,6 +61,7 @@ export function ClosetView() {
   const [modalOpen, setModalOpen] = useState(false);
   const [scanOpen, setScanOpen] = useState(false);
   const [trashOpen, setTrashOpen] = useState(false);
+  const [detail, setDetail] = useState<Item | null>(null);
   const [newName, setNewName] = useState("오프화이트 셔츠");
   const [category, setCategory] = useState("상의");
   const [location, setLocation] = useState("옷장 1");
@@ -171,18 +180,25 @@ export function ClosetView() {
       toast("구매 가격은 숫자로 입력해 주세요 (예: 59,000원)");
       return;
     }
-    const meta = CATEGORY_META[category] ?? CATEGORY_META["상의"];
+    // 이름에 확정 명사가 있으면 카테고리를 교정한다 — '검정 슬랙스'를 상의로 남겨두는 실수를 막는다
+    const resolved = resolveCategory(name, category);
+    const effective = CATEGORY_META[resolved] ? resolved : category;
+    const meta = CATEGORY_META[effective] ?? CATEGORY_META["상의"];
+    // 이름의 색 단어로 색을 정하고, 그 종류·색에 맞는 실제 단품 사진을 먼저 찾는다
+    const color = resolveColor({ name, category: resolved });
+    const photo = matchGarmentPhoto({ name, category: resolved, color });
     addClothing({
       name,
-      cat: `${category} · ${location}`,
+      cat: `${effective} · ${location}`,
       state: "available" as ClothState,
       label: "입을 수 있음",
       bg: meta.bg,
       type: meta.type,
-      color: meta.color,
+      color,
       wear: "0회",
       cpw: "—", // 착용 전에는 회당 비용 미정(구매가를 회당 비용으로 오표기하지 않음)
-      img: newPhoto ?? meta.img,
+      img: photo ?? garmentArtDataUrl({ name, category: resolved, color }),
+      photo: newPhoto ?? undefined,
       daysAgo: 0,
     });
     pendingUrlRef.current = null; // 사진을 아이템이 소유
@@ -190,7 +206,11 @@ export function ClosetView() {
     setModalOpen(false);
     setFilter("all");
     setSearch("");
-    toast(`'${name}'${objectParticle(name)} 옷장에 추가했어요`);
+    toast(
+      effective === category
+        ? `'${name}'${objectParticle(name)} 옷장에 추가했어요`
+        : `'${name}'${objectParticle(name)} ${effective}로 인식해 추가했어요`
+    );
   };
 
   const deleteItem = (item: Item) => {
@@ -331,7 +351,16 @@ export function ClosetView() {
                 className="card cloth-card"
                 data-state={x.state}
                 key={x.id}
-                onClick={() => toast("옷 상세 목업: 상태·착용·케어·코디 탭으로 이동합니다")}
+                role="button"
+                tabIndex={0}
+                aria-label={`${x.name} 상세 보기`}
+                onClick={() => setDetail(x)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setDetail(x);
+                  }
+                }}
               >
                 <div className="cloth-photo" style={{ background: x.bg }}>
                   <span className="state-badge">{x.label}</span>
@@ -561,6 +590,18 @@ export function ClosetView() {
           </div>
         </div>
       )}
+
+      <ItemDetailModal
+        item={detail}
+        onClose={() => setDetail(null)}
+        onUseOutfit={(o) => {
+          const ids = o.items.map((i) => i.id);
+          wearItems(ids);
+          logOutfit({ sig: o.sig, ids, at: Date.now(), tpo: o.tpo.key, gender, title: o.title });
+          switchView("home");
+          toast(`${ids.length}벌을 오늘의 착장으로 기록했어요`);
+        }}
+      />
 
       <WardrobeScanModal
         open={scanOpen}

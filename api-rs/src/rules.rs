@@ -436,3 +436,124 @@ pub fn comma(n: i64) -> String {
         out
     }
 }
+
+// ---- 의류 카테고리 결정적 재판정 (web/lib/garment.ts 의 Rust 미러) ----
+//
+// 왜 필요한가: 비전 모델이 카테고리를 틀리게 돌려주는 실제 사례가 있다.
+// 대표 사례 — 옷걸이 바에 반으로 접혀 걸린 바지는 가로로 넓고 두 겹으로 보여 '상의'로 오인된다.
+// 이름에 '슬랙스·바지·청바지'처럼 다른 카테고리로 읽힐 수 없는 확정 명사가 있으면
+// 그 이름이 모델의 카테고리를 이긴다. 판정은 코드가, 표현은 LLM 이 담당한다는 원칙의 연장.
+
+/// 사용자에게 보이는 카테고리 8종
+pub const CATEGORIES: [&str; 8] = ["상의", "니트", "하의", "아우터", "원피스", "신발", "가방", "액세서리"];
+
+const KW_BOTTOM: &[&str] = &[
+    "바지", "팬츠", "슬랙스", "슬랙", "청바지", "진바지", "데님팬츠", "조거", "트라우저",
+    "치마", "스커트", "반바지", "숏츠", "버뮤다", "레깅스", "스키니", "하의",
+    "pants", "jeans", "slacks", "shorts", "skirt", "trousers", "jogger", "chinos",
+];
+const KW_DRESS: &[&str] = &["원피스", "드레스", "점프수트", "올인원", "dress", "jumpsuit"];
+const KW_SHOE: &[&str] = &[
+    "신발", "슈즈", "스니커", "운동화", "부츠", "로퍼", "구두", "샌들", "힐", "펌프스", "더비", "옥스퍼드",
+    "shoes", "sneaker", "boots", "loafer", "sandal", "heel", "derby", "oxford",
+];
+const KW_BAG: &[&str] = &[
+    "가방", "백팩", "숄더백", "토트", "크로스백", "클러치", "더플", "에코백",
+    "bag", "backpack", "tote", "clutch",
+];
+const KW_ACC: &[&str] = &[
+    "모자", "캡", "비니", "버킷햇", "스카프", "머플러", "목도리", "벨트", "장갑", "양말",
+    "주얼리", "시계", "안경", "선글라스", "넥타이", "반지", "목걸이", "귀걸이", "액세서리",
+    "hat", "cap", "beanie", "scarf", "belt", "socks", "watch", "glasses", "sunglasses", "tie",
+];
+/// 아우터 — 가디건은 니트로 분류하므로 여기 넣지 않는다
+const KW_OUTER: &[&str] = &[
+    "코트", "자켓", "재킷", "점퍼", "패딩", "블레이저", "바람막이", "아노락", "무스탕",
+    "트렌치", "파카", "집업", "조끼", "베스트", "다운", "야상", "아우터",
+    "coat", "jacket", "blazer", "parka", "vest", "windbreaker", "anorak", "puffer",
+];
+const KW_KNIT: &[&str] = &["니트", "스웨터", "풀오버", "가디건", "knit", "sweater", "pullover", "cardigan"];
+const KW_TOP: &[&str] = &[
+    "셔츠", "블라우스", "티셔츠", "반팔티", "긴팔티", "맨투맨", "스웨트", "후드티", "후디",
+    "탱크톱", "폴로", "카라티", "나시",
+    "shirt", "blouse", "tee", "t-shirt", "hoodie", "sweatshirt", "polo", "tank",
+];
+
+/// 소문자화 + 공백 제거 ("데님 자켓" == "데님자켓")
+fn norm_kw(s: &str) -> String {
+    s.to_lowercase().chars().filter(|c| !c.is_whitespace()).collect()
+}
+
+fn hit_kw(text: &str, words: &[&str]) -> bool {
+    words.iter().any(|w| text.contains(w))
+}
+
+/// 키워드만으로 카테고리를 정한다(단서가 없으면 None)
+fn category_from_keywords(text: &str) -> Option<&'static str> {
+    if hit_kw(text, KW_BOTTOM) {
+        return Some("하의");
+    }
+    // '슬림진·스키니진·블랙진'처럼 '진'으로 끝나면 청바지다(단독 '진'은 제외).
+    // web/lib/garment.ts 의 resolveCategory 와 같은 규칙을 유지한다.
+    if text.chars().count() >= 3 && text.ends_with('진') {
+        return Some("하의");
+    }
+    if hit_kw(text, KW_DRESS) {
+        return Some("원피스");
+    }
+    if hit_kw(text, KW_SHOE) {
+        return Some("신발");
+    }
+    if hit_kw(text, KW_BAG) {
+        return Some("가방");
+    }
+    if hit_kw(text, KW_ACC) {
+        return Some("액세서리");
+    }
+    if hit_kw(text, KW_OUTER) {
+        return Some("아우터");
+    }
+    if hit_kw(text, KW_KNIT) {
+        return Some("니트");
+    }
+    if hit_kw(text, KW_TOP) {
+        return Some("상의");
+    }
+    None
+}
+
+/// 이름 + 모델이 준 카테고리 → 최종 카테고리. 이름의 확정 명사가 우선한다.
+pub fn resolve_garment_category(name: &str, raw_category: &str) -> String {
+    let n = norm_kw(name);
+    if let Some(c) = category_from_keywords(&n) {
+        return c.to_string();
+    }
+    let r = raw_category.trim();
+    if CATEGORIES.contains(&r) {
+        return r.to_string();
+    }
+    let rn = norm_kw(r);
+    category_from_keywords(&rn).unwrap_or("상의").to_string()
+}
+
+/// 사진 속 두 영역의 IoU (0.0~1.0). 백분율 좌표(x,y,w,h) 기준.
+pub fn box_iou(a: (f64, f64, f64, f64), b: (f64, f64, f64, f64)) -> f64 {
+    let (ax, ay, aw, ah) = a;
+    let (bx, by, bw, bh) = b;
+    if aw <= 0.0 || ah <= 0.0 || bw <= 0.0 || bh <= 0.0 {
+        return 0.0;
+    }
+    let x1 = ax.max(bx);
+    let y1 = ay.max(by);
+    let x2 = (ax + aw).min(bx + bw);
+    let y2 = (ay + ah).min(by + bh);
+    let iw = (x2 - x1).max(0.0);
+    let ih = (y2 - y1).max(0.0);
+    let inter = iw * ih;
+    let union = aw * ah + bw * bh - inter;
+    if union <= 0.0 {
+        0.0
+    } else {
+        inter / union
+    }
+}

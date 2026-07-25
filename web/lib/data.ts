@@ -1,3 +1,7 @@
+import { resolveCategory } from "./garment";
+import { garmentArtDataUrl, resolveColor } from "./garment-art";
+import { matchGarmentPhoto } from "./garment-catalog";
+
 export type ClothState = "available" | "laundry" | "stored" | "reuse";
 
 export interface Item {
@@ -11,9 +15,12 @@ export interface Item {
   color: string;
   wear: string;
   cpw: string;
+  /** 옷장·마네킹에 보이는 이미지 — 옷 한 점만 담긴 그림(lib/garment-art) */
   img: string;
   daysAgo: number; // 마지막 착용일(안정값, 렌더 인덱스 아님)
   fit?: string; // 핏·실루엣(슬림·오버핏 등) — 색·종류가 비슷한 옷을 구분
+  /** 등록에 쓴 원본 사진(품목 크롭) — 근거로만 보여준다. 목록 썸네일로는 쓰지 않는다 */
+  photo?: string;
 }
 
 // 상태 → 라벨 매핑(케어 완료 등 상태 변경 시 라벨 일관성 유지)
@@ -87,11 +94,24 @@ const SEED: Omit<Item, "id" | "daysAgo">[] = [
   { name: "카멜 오버 니트", cat: "상의 · 계절 보관함", state: "reuse", label: "순환 후보", bg: "#e6ddcf", type: "top-g", color: "#a07b52", wear: "3회", cpw: "₩24,000", img: "/items/knit-camel.jpg" },
 ];
 
-export const initialItems: Item[] = SEED.map((it, i) => ({
-  ...it,
-  id: `seed-${i}`,
-  daysAgo: 1 + ((i * 5 + 2) % 40), // 결정적·안정적인 마지막 착용일
-}));
+/**
+ * 시드 옷장도 '옷 한 점 = 이미지 한 장' 규칙을 따른다.
+ * 원래 시드 사진 일부는 여러 벌을 함께 찍은 플랫레이라 목록 썸네일로 쓸 수 없어서,
+ * 종류·색이 맞는 단품 사진(카탈로그)을 찾고 없으면 비슷한 그림을 만든다. 원본은 photo 로 남긴다.
+ */
+export const initialItems: Item[] = SEED.map((it, i) => {
+  const category = resolveCategory(it.name, it.cat.split("·")[0]?.trim());
+  const color = resolveColor({ name: it.name, hex: it.color, category });
+  const photo = matchGarmentPhoto({ name: it.name, category, color });
+  return {
+    ...it,
+    color,
+    img: photo ?? garmentArtDataUrl({ name: it.name, category, color, fit: it.fit }),
+    photo: it.img,
+    id: `seed-${i}`,
+    daysAgo: 1 + ((i * 5 + 2) % 40), // 결정적·안정적인 마지막 착용일
+  };
+});
 
 export type ViewName = "home" | "closet" | "scan" | "care" | "reuse" | "insights" | "settings";
 

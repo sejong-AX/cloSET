@@ -145,8 +145,18 @@ button,input,select{font:inherit}button{color:inherit}svg{display:block}.hidden{
 .ws-card.on{border-color:var(--forest);background:#f6faf8}
 .ws-check{position:absolute;top:7px;right:7px;z-index:1}
 .ws-check input{width:17px;height:17px;accent-color:var(--forest);cursor:pointer}
-.ws-thumb{width:52px;height:52px;border-radius:9px;overflow:hidden;flex-shrink:0;background:#eef0ec}
-.ws-thumb img{width:100%;height:100%;object-fit:cover}
+/* 옷장 카드 이미지 — 옷 한 점만 담긴 단품 컷이므로 잘라내지 말고 카드 안에 전체가 들어오게 */
+.cloth-photo{overflow:hidden}
+.cloth-photo img.cloth-img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;display:block;padding:10px}
+/* 검수 카드 썸네일 — 옷 한 점만 담긴 이미지(실제 단품 사진 또는 만든 그림) */
+.ws-thumb{position:relative;width:72px;height:72px;border-radius:10px;overflow:hidden;flex-shrink:0;background:#f4f2ee;border:1px solid #e6ece9}
+.ws-thumb>img{width:100%;height:100%;object-fit:contain;background:#f7f6f3}
+/* 사진에서 인식한 부분 — 근거로만 작게 겹쳐 둔다 */
+.ws-source{position:absolute;left:3px;bottom:3px;width:22px;height:22px;border-radius:5px;object-fit:cover;border:1.5px solid #fff;box-shadow:0 1px 3px rgba(20,40,32,.28)}
+.ws-flags{position:absolute;top:3px;left:3px;display:flex;flex-direction:column;gap:2px;align-items:flex-start}
+.ws-flag{padding:1px 5px;border-radius:999px;background:rgba(38,52,46,.82);color:#fff;font-size:8px;font-weight:800;letter-spacing:.02em}
+.ws-flag.real{background:var(--forest)}
+.ws-flag.fix{background:#8a6a2f}
 .ws-fields{display:flex;flex-direction:column;gap:5px;min-width:0;flex:1;padding-right:20px}
 .ws-row{display:flex;gap:5px}
 .ws-name{width:100%;border:1px solid #dbe4df;border-radius:8px;padding:6px 8px;font-size:12px;font-weight:700;color:var(--ink);background:#fff}
@@ -234,3 +244,95 @@ button,input,select{font:inherit}button{color:inherit}svg{display:block}.hidden{
 .route-partner{display:inline-block;margin-top:8px;font-size:9px;font-weight:900;color:var(--forest);letter-spacing:.02em}
 .route-card{cursor:pointer}
 @media(max-width:820px){.mannequin{max-height:320px}.stage-chip{width:32px;height:32px}.brand .brand-logo{width:120px}}
+
+/* ---- 옷 상세 모달 · 착장 기록 · 성별 코디 (2026-07-25 5차) ---- */
+.gender-toggle button{padding:5px 10px;letter-spacing:-.2px}
+.gender-tag{margin-left:auto;background:var(--sand);color:#8a6a33;border-radius:7px;padding:3px 7px;font-size:9px;font-weight:900;letter-spacing:0}
+.gender-tag.shared{background:var(--mint);color:var(--forest2)}
+.rank{gap:8px}
+.outfit-empty{margin:auto 0;text-align:center;padding:10px 4px}
+.outfit-empty svg{width:40px;height:40px;margin:0 auto 10px;color:#9eaaa6}
+.outfit-empty b{display:block;font-size:15px;margin-bottom:6px}
+.outfit-empty p{font-size:11px;color:var(--sub);line-height:1.6;margin:0 0 14px}
+.mini-empty{padding:20px 8px;text-align:center;border:1px dashed var(--line);border-radius:13px;margin-top:12px}
+.mini-empty b{display:block;font-size:12px;margin-bottom:5px}
+.mini-empty span{font-size:10px;color:var(--sub);line-height:1.55}
+.mini-outfit .swatch-item{overflow:hidden;background:#eee9e0}
+.mini-outfit .swatch-item:after{display:none}
+.mini-outfit .swatch-item img{width:100%;height:100%;object-fit:cover;display:block}
+.saved-meta span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:66%}
+
+/* 착장 기록 모달 */
+.past-modal{max-width:560px}
+.past-list{display:grid;gap:8px;max-height:360px;overflow:auto;margin:12px 0}
+.past-row{display:flex;align-items:center;gap:11px;padding:10px;border:1px solid var(--line);border-radius:13px;background:#fbfaf7}
+.past-thumbs{display:flex;gap:3px;flex:none}
+.past-thumbs span{width:34px;height:34px;border-radius:9px;overflow:hidden;background:#eee9e0;display:block}
+.past-thumbs img{width:100%;height:100%;object-fit:cover;display:block}
+.past-info{flex:1;min-width:0}
+.past-info b{display:block;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.past-info span{display:block;font-size:9px;color:var(--sub);margin-top:3px}
+.past-row .btn{flex:none;padding:7px 10px;font-size:10px}
+
+/* 옷 상세 */
+.detail-modal{max-width:660px;max-height:min(88vh,860px);overflow:auto;padding:0}
+.detail-head{display:flex;gap:16px;padding:20px 22px 0}
+.detail-photo{width:132px;height:158px;border-radius:15px;overflow:hidden;position:relative;flex:none}
+.detail-photo img{width:100%;height:100%;object-fit:contain;display:block;padding:8px}
+/* 등록 근거로 남긴 원본 사진 — 구석에 작게 */
+.detail-photo .detail-source{position:absolute;right:6px;bottom:6px;width:44px;height:44px;padding:0;object-fit:cover;border-radius:8px;border:2px solid #fff;box-shadow:0 2px 6px rgba(20,40,32,.3)}
+.detail-title{min-width:0;flex:1}
+.detail-title h2{font-size:21px;letter-spacing:-.6px;margin:4px 0 5px;overflow-wrap:anywhere}
+.detail-title>p{font-size:10px;color:var(--sub);margin:0 0 12px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.detail-quick{display:flex;gap:7px;flex-wrap:wrap}
+.detail-quick .btn{padding:8px 11px;font-size:10px}
+.detail-tabs{display:flex;gap:4px;padding:16px 22px 0;border-bottom:1px solid var(--line);margin-top:14px}
+.detail-tabs button{border:0;background:transparent;font:inherit;font-size:11px;font-weight:800;color:var(--sub);padding:9px 13px;border-radius:11px 11px 0 0;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px}
+.detail-tabs button.active{color:var(--forest);border-bottom-color:var(--forest);background:var(--mint)}
+.detail-body{padding:18px 22px 4px}
+.detail-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:7px}
+.detail-stats div{background:#f6f8f7;border-radius:11px;padding:10px 8px;text-align:center}
+.detail-stats span{font-size:9px;color:var(--sub);display:block}
+.detail-stats b{font-size:12px;display:block;margin-top:4px}
+.detail-section{margin-top:18px}
+.detail-section h3{font-size:12px;margin:0 0 9px}
+.state-grid{display:grid;grid-template-columns:1fr 1fr;gap:7px}
+.state-btn{border:1px solid var(--line);background:white;border-radius:12px;padding:10px 11px;text-align:left;cursor:pointer;font:inherit}
+.state-btn b{font-size:11px;display:block}
+.state-btn span{font-size:9px;color:var(--sub);display:block;margin-top:3px;line-height:1.45}
+.state-btn.active{border-color:var(--forest);background:var(--mint)}
+.state-btn.active b{color:var(--forest2)}
+.detail-actions-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.detail-care{display:flex;gap:14px;align-items:flex-start}
+.detail-care h3{font-size:14px;margin:2px 0 6px}
+.detail-care p{font-size:11px;color:var(--sub);line-height:1.65;margin:0}
+.detail-care .guide-icon{margin:0;flex:none}
+.detail-care .symbol-row{margin:12px 0 0}
+.detail-note{font-size:9px;color:var(--sub);margin:10px 0 0}
+.detail-outfits{display:grid;gap:10px}
+.detail-outfit{display:flex;gap:14px;align-items:center;border:1px solid var(--line);border-radius:14px;padding:10px;background:#fbfcfa}
+.detail-outfit-mq{width:96px;height:190px;flex:none;background:linear-gradient(140deg,#eef4ef,#dcebe3);border-radius:11px;display:grid;place-items:end center;overflow:hidden}
+.detail-outfit-mq .mannequin{height:100%;max-height:190px}
+.detail-outfit-info{min-width:0;flex:1}
+.detail-outfit-info b{display:block;font-size:13px;margin:5px 0}
+.detail-outfit-info>span{display:block;font-size:10px;color:var(--sub);line-height:1.55;margin-bottom:10px;overflow-wrap:anywhere}
+.detail-modal .modal-actions{padding:0 22px 20px}
+@media(max-width:640px){
+ .detail-head{flex-direction:column}
+ .detail-photo{width:100%;height:190px}
+ .detail-stats{grid-template-columns:1fr 1fr}
+ .state-grid{grid-template-columns:1fr}
+ .detail-outfit{flex-direction:column;align-items:stretch}
+ .detail-outfit-mq{width:100%;height:220px}
+ .past-thumbs span{width:28px;height:28px}
+}
+
+/* ---- 단품 컷 표시 규칙 (마지막에 두어 앞선 cover 규칙을 확실히 덮는다) ----
+   옷 한 점만 담긴 이미지이므로 잘라내면 옷의 형태가 사라진다. 항상 전체가 보이게 한다. */
+.cloth-photo img.cloth-img,
+.stage-chip img,
+.swatch-item img,
+.mini-outfit .swatch-item img,
+.rack-item img,
+.detail-photo img{object-fit:contain}
+.stage-chip img,.swatch-item img,.rack-item img{background:#f5f3ef}
